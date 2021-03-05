@@ -1,0 +1,475 @@
+(require '[cognitect.transcriptor :as xr :refer [check!]]
+         '[sherpa.core :as sut :refer :all])
+
+;;; Bindings to private definitions
+(def make-transformation (deref (var sut/make-transformation)))
+(def grid->graph (deref (var sut/grid->graph)))
+(def graph->grid (deref (var sut/graph->grid)))
+(def encode (deref (var sut/encode)))
+(def decode (deref (var sut/decode)))
+(def disable (deref (var sut/disable)))
+(def enable (deref (var sut/enable)))
+(def push (deref (var sut/push)))
+(def make-transformation-stack (deref (var sut/make-transformation-stack)))
+
+;;; Insertion creates an to-graph dead-end and a to-grid split. Asking for the
+;;; coordinates of the cells 1-10 after inserting 4 new ones at position 2
+;;; (i.e. the first new cell will be at 2).
+(map (-> {:action :insert :index 2 :count 4}
+         make-transformation
+         :to-grid)
+     (range 1 11))
+
+;;; The cell at 1 is there, all the rest are moved 4 slots to the right
+(check! #{[1 6 7 8 9 10 11 12 13 14]})
+
+;;; The same insertion as above (4 new cells at 2), but now asking for the
+;;; *old* coordinates of cells 1-10 in the *new* grid.
+(map (-> {:action :insert :index 2 :count 4}
+         make-transformation
+         :to-graph)
+     (range 1 11))
+
+;;; The cell at 1 is unchanged, the next 4 (new) cells cause early exit
+;;; (`nil`) and the rest correspond to 4 positions to the left.
+(check! #{[1 nil nil nil nil 2 3 4 5 6]})
+
+
+;;; Deletion creates a to-graph split and a to-grid dead-end. Asking for the
+;;; coordinates of the cells 1-10 after deleting 2 at position 4 (i.e. the
+;;; first new cell will be at 2).
+(map (-> {:action :delete :index 4 :count 2}
+         make-transformation
+         :to-grid)
+     (range 1 11))
+
+;;; The cells at 1-3 are unchanged, the next 2 cells cause early exit (`nil`)
+;;; and the rest correspond to 2 positions to the left.
+(check! #{[1 2 3 nil nil 4 5 6 7 8]})
+
+;;; The same deletion as above (2 cells at 4), but now asking for the *old*
+;;; coordinates of cells 1-10 in the *new* grid.
+(map (-> {:action :delete :index 4 :count 2}
+         make-transformation
+         :to-graph)
+     (range 1 11))
+
+;;; The cells at 1-3 unchanged, all the rest are moved 2 slots to the left.
+(check! #{[1 2 3 6 7 8 9 10 11 12]})
+
+
+;;; Moving cells around is equivalent to a transposition of two groups of
+;;; cells for both directions. We will move the cells 7-9 5 positions to the
+;;; left.
+(map (-> {:action :move :index 7 :count 3 :offset -5}
+         make-transformation
+         :to-graph)
+     (range 1 11))
+
+;;; Original positions of the first 10 cells as found in the new grid
+(check! #{[1 7 8 9 2 3 4 5 6 10]})
+
+(map (-> {:action :move :index 7 :count 3 :offset -5}
+         make-transformation
+         :to-grid)
+     (range 1 11))
+
+;;; Coordinates of the cells 1-10 (in their original order)
+(check! #{[1 5 6 7 8 9 2 3 4 10]})
+
+;;; Same tests for the equivalent operation of moving cells 2-6 3 positions to
+;;; the right
+(map (-> {:action :move :index 2 :count 5 :offset 3}
+         make-transformation
+         :to-graph)
+     (range 1 11))
+
+;;; Original positions of the first 10 cells as found in the new grid
+(check! #{[1 7 8 9 2 3 4 5 6 10]})
+
+(map (-> {:action :move :index 2 :count 5 :offset 3}
+         make-transformation
+         :to-grid)
+     (range 1 11))
+
+;;; Coordinates of the cells 1-10 (in their original order)
+(check! #{[1 5 6 7 8 9 2 3 4 10]})
+
+
+;;; Transformation stacks
+(def test-tf-stack
+  (-> (make-transformation-stack)
+      (push {:action :insert :index 2 :count 3})
+      (push {:action :insert :index 2 :count 3})
+      (push {:action :insert :index 2 :count 3})
+      (push {:action :insert :index 2 :count 3})
+      (push {:action :insert :index 2 :count 3})
+      (push {:action :insert :index 2 :count 3})))
+
+;;; Early exits as expected
+(map #(grid->graph test-tf-stack %) (range 1 25))
+(check! #{[[0 1]
+           [6 2] [6 3] [6 4]
+           [5 2] [5 3] [5 4]
+           [4 2] [4 3] [4 4]
+           [3 2] [3 3] [3 4]
+           [2 2] [2 3] [2 4]
+           [1 2] [1 3] [1 4]
+           [0 2] [0 3] [0 4] [0 5] [0 6]]})
+
+;;; Round trip leaves input positions intact
+(defn round-trip-ok? [tf-stack pos-seq]
+  (->> pos-seq
+       (map #(grid->graph tf-stack %))
+       (map #(graph->grid tf-stack %))
+       (= pos-seq)))
+
+(check! (fn [_] (round-trip-ok? test-tf-stack (range 1 21))))
+
+
+;;; Grid<->graph transformation scenarios
+(def test-tf-stack
+  (-> (make-transformation-stack)
+      (push {:action :insert
+             :index 2
+             :count 10})
+      (push {:action :delete
+             :index 4
+             :count 3})))
+
+(check! (fn [_] (every? #(round-trip-ok? % (range 1 25))
+                        [test-tf-stack
+                         (-> test-tf-stack (disable 0))
+                         (-> test-tf-stack (disable 1))
+                         (-> test-tf-stack (disable 1) (disable 0))
+                         (-> test-tf-stack (disable 0) (disable 1))])))
+
+;;; Let's see how deactivation of nodes (via disable) is handled. Before
+;;; insertion, we get the grid->graph mapping:
+(map #(grid->graph test-tf-stack %) (range 1 11))
+(check! #{[[0 1] [1 2] [1 3] [1 7] [1 8] [1 9] [1 10] [1 11] [0 2] [0 3]]})
+
+
+;;; Scenario 1: Disable deletion
+
+;;; If we disable the deletion, we get the following mapping:
+(map #(grid->graph (disable test-tf-stack 1) %) (range 1 11))
+(check! #{[[0 1] [1 2] [1 3] [1 4] [1 5] [1 6] [1 7] [1 8] [1 9] [1 10]]})
+
+;;; Before the disable, nodes [1 4], [1 5] and [1 6] were inactive...
+(check! (fn [_]
+          (= (map #(graph->grid test-tf-stack %)
+                  [[1 3] [1 4] [1 5] [1 6] [1 7]])
+             [3 nil nil nil 4])))
+
+;;; ... but if any one of them corresponded to a slice edge, we could have
+;;; specified the appropriate bypass direction to obtain appropriate results.
+(check! (fn [_]
+          (= (map #(graph->grid test-tf-stack % :min)
+                  [[1 3] [1 4] [1 5] [1 6] [1 7]])
+             [3 3 3 3 4])))
+
+(check! (fn [_]
+          (= (map #(graph->grid test-tf-stack % :max)
+                  [[1 3] [1 4] [1 5] [1 6] [1 7]])
+             [3 4 4 4 4])))
+
+;;; After the deletion disable, these nodes return back to their place:
+(check! (fn [_] (= (map #(graph->grid (disable test-tf-stack 1) %)
+                        [[1 3] [1 4] [1 5] [1 6] [1 7]])
+                   [3 4 5 6 7])))
+
+
+;;; Scenario 2: Disable insertion
+
+;;; If we disable the insertion, we get the following mapping (note that no
+;;; nodes in layout 1 are seen from the (top-level) layout 2):
+(map #(grid->graph (disable test-tf-stack 0) %) (range 1 11))
+(check! #{[[0 1] [0 2] [0 3] [0 7] [0 8] [0 9] [0 10] [0 11] [0 12] [0 13]]})
+
+;;; The (inactive) layout 1 nodes are now mapped to nowhere:
+(check! (fn [_] (->> (range 1 25)
+                     (map #(-> test-tf-stack
+                               (disable 0)
+                               (graph->grid [1 %])))
+                     (every? nil?))))
+
+;;; Not so for the (original) layout 0:
+(map #(-> test-tf-stack
+          (disable 0)
+          (graph->grid [0 %]))
+     (range 1 20))
+
+(check! #{[1 2 3 nil nil nil 4 5 6 7 8 9 10 11 12 13 14 15 16]})
+
+;;; Still, if any node of the deactivated layout 1 is a slice edge, we can
+;;; meaningfully resolve it to positions in the current toplevel layout by
+;;; specifying a bypass direction (note the deletion higher in the
+;;; transformation stack):
+(map #(-> test-tf-stack
+          (disable 0)
+          (graph->grid [1 %] :min))
+     (range 1 25))
+(check! #{[1 1 1 1 1 1 1 1 1 1 1 2 3 3 3 3 4 5 6 7 8 9 10 11]})
+
+(map #(-> test-tf-stack
+          (disable 0)
+          (graph->grid [1 %] :max))
+     (range 1 25))
+(check! #{[1 2 2 2 2 2 2 2 2 2 2 2 3 4 4 4 4 5 6 7 8 9 10 11]})
+
+
+;;; Scenario 3: Individual disable and slices
+
+;;; Let's remember the nodes corresponding to the first positions:
+(map #(grid->graph test-tf-stack %) (range 1 11))
+(check! #{[[0 1] [1 2] [1 3] [1 7] [1 8] [1 9] [1 10] [1 11] [0 2] [0 3]]})
+
+;;; After both the insertion and deletion, we refer to the 2:5 slice...
+(map #(grid->graph test-tf-stack %) (range 2 6))
+(check! #{[[1 2] [1 3] [1 7] [1 8]]})
+
+;;; ... and sure enough, the reverse mapping is preserved:
+(map #(graph->grid test-tf-stack %) [[1 2] [1 3] [1 7] [1 8]])
+(check! #{(range 2 6)})
+
+;;; If we disable the deletion (which removed the nodes [1 4] [1 5] and [1 6])
+;;; and query that slice's edges, the undeleted cells resurface:
+[(-> test-tf-stack (graph->grid [1 2] :max))
+ (-> test-tf-stack (graph->grid [1 8] :min))]
+(check! #{[2 5]})
+
+[(-> test-tf-stack (disable 1) (graph->grid [1 2] :max))
+ (-> test-tf-stack (disable 1) (graph->grid [1 8] :min))]
+(check! #{[2 8]})
+
+;;; If we disable the insertion (which inserted all of the slice nodes) and
+;;; query for the slice edges, we get an empty position interval (init > term)
+[(-> test-tf-stack (disable 0) (graph->grid [1 2] :max))
+ (-> test-tf-stack (disable 0) (graph->grid [1 8] :min))]
+(check! #{[2 1]})
+
+[(-> test-tf-stack (disable 1) (disable 0) (graph->grid [1 2] :max))
+ (-> test-tf-stack (disable 1) (disable 0) (graph->grid [1 8] :min))]
+(check! #{[2 1]})
+
+;;; Slice from initial layout origin to a inserted, then deleted cell (0 =
+;;; insertion, 1 = deletion):
+[(-> test-tf-stack (graph->grid [0 1] :max))
+ (-> test-tf-stack (graph->grid [1 5] :min))]
+(check! #{[1 3]})
+
+[(-> test-tf-stack (disable 1) (graph->grid [0 1] :max))
+ (-> test-tf-stack (disable 1) (graph->grid [1 5] :min))]
+(check! #{[1 5]})
+
+[(-> test-tf-stack (disable 0) (graph->grid [0 1] :max))
+ (-> test-tf-stack (disable 0) (graph->grid [1 5] :min))]
+(check! #{[1 1]})
+
+[(-> test-tf-stack (disable 1) (disable 0) (graph->grid [0 1] :max))
+ (-> test-tf-stack (disable 1) (disable 0) (graph->grid [1 5] :min))]
+(check! #{[1 1]})
+
+
+;;; Scenario 4: Non-hierarchical disable behavior
+
+;;; Slice in the initial layout outside the affected region:
+[(-> test-tf-stack (graph->grid [0 4] :max))
+ (-> test-tf-stack (graph->grid [0 6] :min))]
+(check! #{[11 13]})
+
+;;; Undid deletion
+[(-> test-tf-stack (disable 1) (graph->grid [0 4] :max))
+ (-> test-tf-stack (disable 1) (graph->grid [0 6] :min))]
+(check! #{[14 16]})
+
+;;; Undid both insertion and deletion
+[(-> test-tf-stack (disable 0) (disable 1) (graph->grid [0 4]))
+ (-> test-tf-stack (disable 0) (disable 1) (graph->grid [0 6]))]
+(check! #{[4 6]})
+
+;;; Undid insertion only: deletion removes initial layout cells instead of the
+;;; inserted ones (which are deactivated)
+(map #(grid->graph (disable test-tf-stack 0) %) (range 1 11))
+(check! #{[[0 1] [0 2] [0 3] [0 7] [0 8] [0 9] [0 10] [0 11] [0 12] [0 13]]})
+
+[(-> test-tf-stack (disable 0) (graph->grid [0 4]))
+ (-> test-tf-stack (disable 0) (graph->grid [0 6]))]
+(check! #{[nil nil]})
+
+[(-> test-tf-stack (disable 0) (graph->grid [0 4] :max))
+ (-> test-tf-stack (disable 0) (graph->grid [0 6] :min))]
+(check! #{[4 3]})
+
+[(-> test-tf-stack (disable 0) (graph->grid [0 4] :max))
+ (-> test-tf-stack (disable 0) (graph->grid [0 7] :min))]
+(check! #{[4 4]})
+
+
+;;; Node encoding/decoding
+(dotimes [_ 10000]
+  (let [node-id (rand-int 1000000000)]
+    (when-not (-> node-id decode encode (= node-id))
+      (throw (ex-info "decode-encode failed" {:node-id node-id})))))
+
+(dotimes [_ 10000]
+  (let [node {:sheet      (rand-int 1000000000)
+              :row-layout (rand-int 1000000000)
+              :row-pos    (rand-int 1000000000)
+              :col-layout (rand-int 1000000000)
+              :col-pos    (rand-int 1000000000)}]
+    (when-not (-> node encode decode (= node))
+      (throw (ex-info "encode-decode failed" {:node node})))))
+
+
+;;; Nodes, cells and slices
+(def test-tfs
+  {:row-stack (-> (make-transformation-stack)
+                  (push {:action :insert :index 2 :count 10})
+                  (push {:action :delete :index 4 :count 3}))
+   :col-stack (-> (make-transformation-stack)
+                  (push {:action :move :index 8 :count 10 :offset -3})
+                  (push {:action :delete :index 4 :count 3}))})
+
+(defn show-node [id]
+  (let [{:keys [sheet row-layout row-pos col-layout col-pos]} (decode id)]
+    [sheet [row-layout row-pos] [col-layout col-pos]]))
+
+(defn slice-edges [cells]
+  {:from [(reduce min (map :row cells)) (reduce min (map :col cells))]
+   :to   [(reduce max (map :row cells)) (reduce max (map :col cells))]})
+
+
+;;; Node->cell conversion
+(-> {:sheet 0 :row-layout 0 :row-pos 5 :col-layout 0 :col-pos 5}
+    encode (node-id->cell test-tfs))
+(check! #{{:sheet 0 :row 12 :col 12}})
+
+(-> {:sheet 0 :row-layout 0 :row-pos 5 :col-layout 0 :col-pos 5}
+    encode
+    (node-id->cell (-> test-tfs
+                       ;; disable deletions
+                       (update :row-stack disable 1)
+                       (update :col-stack disable 1))))
+(check! #{{:sheet 0 :row 15 :col 15}})
+
+;;; The node vanishes if we disable the row insertion, the col move, or both
+;;; (its cell is subsequently deleted -- this is a case of non-hierarchical
+;;; disable)
+(map (->> {:sheet 0
+           :row-layout 0 :row-pos 5
+           :col-layout 0 :col-pos 5}
+          encode
+          (partial node-id->cell))
+     [(-> test-tfs (update :row-stack disable 0))
+      (-> test-tfs (update :col-stack disable 0))
+      (-> test-tfs
+          (update :row-stack disable 0)
+          (update :col-stack disable 0))])
+(check! #(every? nil? %))
+
+
+;;; Cell->node conversion
+(->> [{:sheet 0 :row 1 :col 1} {:sheet 0 :row 12 :col 12}]
+     (map #(-> % (cell->node-id test-tfs) show-node)))
+(check! #{[[0 [0 1] [0 1]] [0 [0 5] [0 5]]]})
+
+(->> [{:sheet 0 :row 1 :col 1} {:sheet 0 :row 15 :col 15}]
+     (map #(-> (cell->node-id % (-> test-tfs
+                                    ;; disable deletions
+                                    (update :row-stack disable 1)
+                                    (update :col-stack disable 1)))
+               show-node)))
+(check! #{[[0 [0 1] [0 1]] [0 [0 5] [0 5]]]})
+
+
+;;; Slices
+(-> {:start (encode {:sheet      0
+                     :row-layout 0 :row-pos 1
+                     :col-layout 0 :col-pos 1})
+     :end   (encode {:sheet      0
+                     :row-layout 0 :row-pos 2
+                     :col-layout 0 :col-pos 5})}
+    (slice-ids->cells test-tfs)
+    slice-edges)
+(check! #{{:from [1 1] :to [9 12]}})
+
+(-> {:start (encode {:sheet      0
+                     :row-layout 0 :row-pos 1
+                     :col-layout 0 :col-pos 1})
+     :end   (encode {:sheet      0
+                     :row-layout 0 :row-pos 2
+                     :col-layout 0 :col-pos 5})}
+    (slice-ids->cells (-> test-tfs
+                          ;; disable deletions
+                          (update :row-stack disable 1)
+                          (update :col-stack disable 1)))
+    slice-edges)
+(check! #{{:from [1 1] :to [12 15]}})
+
+(-> {:start (encode {:sheet      0
+                     :row-layout 0 :row-pos 1
+                     :col-layout 0 :col-pos 1})
+     :end   (encode {:sheet      0
+                     :row-layout 0 :row-pos 2
+                     :col-layout 0 :col-pos 5})}
+    (slice-ids->cells (-> test-tfs
+                          ;; disable insertion
+                          (update :row-stack disable 0)
+                          ;; disable move (essentially insertion to slice)
+                          (update :col-stack disable 0)))
+    slice-edges)
+(check! #{{:from [1 1] :to [2 3]}})
+
+
+;;; High-level interface and undo/redo
+(defn show-statuses [{:keys [row-stack col-stack trail]}]
+  {:row  (mapv :active row-stack)
+   :col  (mapv :active col-stack)
+   :last (:last-active trail)})
+
+(def test-graph-map
+  (-> (make)
+      (insert-columns 2 3)
+      (move-rows 3 4 5)
+      (delete-columns 9 2)
+      (insert-rows 8 4)))
+
+(check! (fn [_]
+          (let [undone (->> test-graph-map (iterate undo) (take 5) reverse)]
+            (= undone (->> undone first (iterate redo) (take 5))))))
+
+(->> test-graph-map (iterate undo) (take 6) (map show-statuses))
+(check! #{[{:row [true  true]  :col [true  true]  :last 3}
+           {:row [true  false] :col [true  true]  :last 2}
+           {:row [true  false] :col [true  false] :last 1}
+           {:row [false false] :col [true  false] :last 0}
+           {:row [false false] :col [false false] :last -1}
+           {:row [false false] :col [false false] :last -1}]})
+
+(->> test-graph-map (iterate undo) (drop 6) first
+     (iterate redo) (take 6)
+     (map show-statuses))
+(check! #{[{:row [false false] :col [false false] :last -1}
+           {:row [false false] :col [true false]  :last 0}
+           {:row [true false]  :col [true false]  :last 1}
+           {:row [true false]  :col [true true]   :last 2}
+           {:row [true true]   :col [true true]   :last 3}
+           {:row [true true]   :col [true true]   :last 3}]})
+
+;;; New operations truncate undone ones
+(-> test-graph-map undo undo redo
+    (move-columns 8 2 -3) (delete-rows 5 1)
+    ;; no amount of `redo` can bring back the undone row operation
+    redo redo redo redo redo redo
+    ((juxt show-statuses :trail)))
+(check! #{[{:row  [true false true]
+            :col  [true true true]
+            :last 4}
+           {:op-pointers [[:col-stack 0]
+                          [:row-stack 0]
+                          [:col-stack 1]
+                          [:col-stack 2]
+                          [:row-stack 2]]
+            :last-active 4}]})
