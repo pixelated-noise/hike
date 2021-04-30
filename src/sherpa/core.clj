@@ -32,18 +32,17 @@
 
 ;;; Bidirectional transformations
 (defn- normalize-move [{:keys [index count offset] :as tf}]
-  (if (neg? offset)
-    {:index  (+ index offset)
-     :count  (- offset)
-     :offset count}
-    tf))
+  (if (pos? offset) tf
+      {:index  (+ index offset)
+       :count  (- offset)
+       :offset count}))
 
 (defn- make-transformation [{:keys [action] :as op}]
   (condp = action
     :insert {:to-graph (dead-end op) :to-grid (split op)}
     :delete {:to-graph (split op) :to-grid (dead-end op)}
     ;; normalize the `move` (ensuring a positive `offset`) to enable swapping
-    ;; of `count` with `offset` for the `graph`-direction transformation
+    ;; of `count` with `offset` for the `to-graph` transformation
     :move   (let [{:keys [count offset] :as op} (normalize-move op)]
               {:to-graph (cross (merge op {:count  offset
                                            :offset count}))
@@ -82,10 +81,10 @@
 (defn- graph->grid
   ([tf-stack node] (graph->grid tf-stack node nil))
   ([tf-stack [layout pos :as node] bypass]
-   (letfn [(active-grid? [layout]
+   (letfn [(active? [layout]
              (or (zero? layout)
                  (:active (get tf-stack (dec layout)))))
-           (to-active-node [[layout pos :as node]]
+           (to-active [[layout pos :as node]]
              (->> (subvec tf-stack 0 layout)
                   rseq
                   (take-while (comp not :active))
@@ -99,10 +98,8 @@
                             (or (to-grid pos bypass)
                                 (reduced nil)))
                           pos)))]
-     (cond (active-grid? layout) (to-grid node)
-           bypass                (-> node
-                                     to-active-node
-                                     to-grid)))))
+     (cond (active? layout) (to-grid node)
+           bypass           (-> node to-active to-grid)))))
 
 ;;; Spec provided here as an overview
 (s/def ::id (s/and integer? (complement neg?)))
