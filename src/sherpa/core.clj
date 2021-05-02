@@ -86,19 +86,18 @@
              (or (zero? layout)
                  (:active (get tf-stack (dec layout)))))
            (to-active [[layout pos :as node]]
-             (->> (subvec tf-stack 0 layout)
-                  rseq
-                  (take-while (comp not :active))
-                  (reduce (fn [[layout pos] {:keys [to-graph]}]
-                            [(dec layout) (to-graph pos bypass)])
-                          node)))
+             (transduce (take-while (complement :active))
+                        (completing (fn [[layout pos] {:keys [to-graph]}]
+                                      [(dec layout) (to-graph pos bypass)]))
+                        node
+                        (rseq (subvec tf-stack 0 layout))))
            (to-grid [[layout pos]]
-             (->> (subvec tf-stack layout)
-                  (filter :active)
-                  (reduce (fn [pos {:keys [active to-grid]}]
-                            (or (to-grid pos bypass)
-                                (reduced nil)))
-                          pos)))]
+             (transduce (filter :active)
+                        (completing (fn [pos {:keys [active to-grid]}]
+                                      (or (to-grid pos bypass)
+                                          (reduced nil))))
+                        pos
+                        (subvec tf-stack layout)))]
      (cond (active? layout) (to-grid node)
            bypass           (-> node to-active to-grid)))))
 
