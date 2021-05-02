@@ -1,12 +1,11 @@
 (require '[cognitect.transcriptor :as xr :refer [check!]]
+         '[clojure.math.combinatorics :as comb]
          '[sherpa.core :as sut :refer :all])
 
 ;;; Bindings to private definitions
 (def make-transformation (deref (var sut/make-transformation)))
 (def grid->graph (deref (var sut/grid->graph)))
 (def graph->grid (deref (var sut/graph->grid)))
-(def encode (deref (var sut/encode)))
-(def decode (deref (var sut/decode)))
 (def disable (deref (var sut/disable)))
 (def enable (deref (var sut/enable)))
 (def push (deref (var sut/push)))
@@ -307,140 +306,99 @@
 (check! #{[4 4]})
 
 
-;;; Node encoding/decoding
-(dotimes [_ 10000]
-  (let [node-id (rand-int 1000000000)]
-    (when-not (-> node-id decode encode (= node-id))
-      (throw (ex-info "decode-encode failed" {:node-id node-id})))))
-
-(dotimes [_ 10000]
-  (let [node {:sheet      (rand-int 1000000000)
-              :row-layout (rand-int 1000000000)
-              :row-pos    (rand-int 1000000000)
-              :col-layout (rand-int 1000000000)
-              :col-pos    (rand-int 1000000000)}]
-    (when-not (-> node encode decode (= node))
-      (throw (ex-info "encode-decode failed" {:node node})))))
-
-
 ;;; Nodes, cells and slices
-(def test-tfs
-  {:row-stack (-> (make-transformation-stack)
-                  (push {:action :insert :index 2 :count 10})
-                  (push {:action :delete :index 4 :count 3}))
-   :col-stack (-> (make-transformation-stack)
-                  (push {:action :move :index 8 :count 10 :offset -3})
-                  (push {:action :delete :index 4 :count 3}))})
+(def test-chart
+  (-> (make-chart {:dimensions [:row :col]})
+      (operate :row {:action :insert :index 2 :count 10})
+      (operate :row {:action :delete :index 4 :count 3})
+      (operate :col {:action :move :index 8 :count 10 :offset -3})
+      (operate :col {:action :delete :index 4 :count 3})))
 
-(defn show-node [id]
-  (let [{:keys [sheet row-layout row-pos col-layout col-pos]} (decode id)]
-    [sheet [row-layout row-pos] [col-layout col-pos]]))
+;; (defn show-node [id]
+;;   (let [{:keys [sheet row-layout row-pos col-layout col-pos]} (decode id)]
+;;     [sheet [row-layout row-pos] [col-layout col-pos]]))
 
-(defn slice-edges [cells]
-  {:from [(reduce min (map :row cells)) (reduce min (map :col cells))]
-   :to   [(reduce max (map :row cells)) (reduce max (map :col cells))]})
+(defn cell-range [[fr fc] [tr tc]]
+  (set (comb/cartesian-product (range fr (inc tr)) (range fc (inc tc)))))
 
 
 ;;; Node->cell conversion
-(-> {:sheet 0 :row-layout 0 :row-pos 5 :col-layout 0 :col-pos 5}
-    encode (node-id->cell test-tfs))
-(check! #{{:sheet 0 :row 12 :col 12}})
+(node-id->cell [[0 5] [0 5]] test-chart)
+(check! #{[12 12]})
 
-(-> {:sheet 0 :row-layout 0 :row-pos 5 :col-layout 0 :col-pos 5}
-    encode
-    (node-id->cell (-> test-tfs
-                       ;; disable deletions
-                       (update :row-stack disable 1)
-                       (update :col-stack disable 1))))
-(check! #{{:sheet 0 :row 15 :col 15}})
+(node-id->cell [[0 5] [0 5]]
+               (-> test-chart
+                   ;; disable deletions
+                   (update-in [:transformations 0] disable 1)
+                   (update-in [:transformations 1] disable 1)))
+(check! #{[15 15]})
 
 ;;; The node vanishes if we disable the row insertion, the col move, or both
 ;;; (its cell is subsequently deleted -- this is a case of non-hierarchical
 ;;; disable)
-(map (->> {:sheet 0
-           :row-layout 0 :row-pos 5
-           :col-layout 0 :col-pos 5}
-          encode
-          (partial node-id->cell))
-     [(-> test-tfs (update :row-stack disable 0))
-      (-> test-tfs (update :col-stack disable 0))
-      (-> test-tfs
-          (update :row-stack disable 0)
-          (update :col-stack disable 0))])
+(map (partial node-id->cell [[0 5] [0 5]])
+     [(update-in test-chart [:transformations 0] disable 0)
+      (update-in test-chart [:transformations 1] disable 0)
+      (-> test-chart
+          (update-in [:transformations 0] disable 0)
+          (update-in [:transformations 1] disable 0))])
 (check! #(every? nil? %))
 
 
 ;;; Cell->node conversion
-(->> [{:sheet 0 :row 1 :col 1} {:sheet 0 :row 12 :col 12}]
-     (map #(-> % (cell->node-id test-tfs) show-node)))
-(check! #{[[0 [0 1] [0 1]] [0 [0 5] [0 5]]]})
+(map #(cell->node-id % test-chart) [[1 1] [12 12]])
+(check! #{[[[0 1] [0 1]] [[0 5] [0 5]]]})
 
-(->> [{:sheet 0 :row 1 :col 1} {:sheet 0 :row 15 :col 15}]
-     (map #(-> (cell->node-id % (-> test-tfs
-                                    ;; disable deletions
-                                    (update :row-stack disable 1)
-                                    (update :col-stack disable 1)))
-               show-node)))
-(check! #{[[0 [0 1] [0 1]] [0 [0 5] [0 5]]]})
+(map #(cell->node-id % (-> test-chart
+                           ;; disable deletions
+                           (update-in [:transformations 0] disable 1)
+                           (update-in [:transformations 1] disable 1)))
+     [[1 1] [15 15]])
+(check! #{[[[0 1] [0 1]] [[0 5] [0 5]]]})
 
 
 ;;; Slices
-(-> {:start (encode {:sheet      0
-                     :row-layout 0 :row-pos 1
-                     :col-layout 0 :col-pos 1})
-     :end   (encode {:sheet      0
-                     :row-layout 0 :row-pos 2
-                     :col-layout 0 :col-pos 5})}
-    (slice-ids->cells test-tfs)
-    slice-edges)
-(check! #{{:from [1 1] :to [9 12]}})
+(slice-ids->cells {:start [[0 1] [0 1]]
+                   :end   [[0 2] [0 5]]}
+                  test-chart)
+(check! #(= (cell-range [1 1] [9 12]) (set %)))
 
-(-> {:start (encode {:sheet      0
-                     :row-layout 0 :row-pos 1
-                     :col-layout 0 :col-pos 1})
-     :end   (encode {:sheet      0
-                     :row-layout 0 :row-pos 2
-                     :col-layout 0 :col-pos 5})}
-    (slice-ids->cells (-> test-tfs
-                          ;; disable deletions
-                          (update :row-stack disable 1)
-                          (update :col-stack disable 1)))
-    slice-edges)
-(check! #{{:from [1 1] :to [12 15]}})
+(slice-ids->cells {:start [[0 1] [0 1]]
+                   :end   [[0 2] [0 5]]}
+                  (-> test-chart
+                      ;; disable deletions
+                      (update-in [:transformations 0] disable 1)
+                      (update-in [:transformations 1] disable 1)))
+(check! #(= (cell-range [1 1] [12 15]) (set %)))
 
-(-> {:start (encode {:sheet      0
-                     :row-layout 0 :row-pos 1
-                     :col-layout 0 :col-pos 1})
-     :end   (encode {:sheet      0
-                     :row-layout 0 :row-pos 2
-                     :col-layout 0 :col-pos 5})}
-    (slice-ids->cells (-> test-tfs
-                          ;; disable insertion
-                          (update :row-stack disable 0)
-                          ;; disable move (essentially insertion to slice)
-                          (update :col-stack disable 0)))
-    slice-edges)
-(check! #{{:from [1 1] :to [2 3]}})
+(slice-ids->cells {:start [[0 1] [0 1]]
+                   :end   [[0 2] [0 5]]}
+                  (-> test-chart
+                      ;; disable insertion
+                      (update-in [:transformations 0] disable 0)
+                      ;; disable move (essentially insertion to slice)
+                      (update-in [:transformations 1] disable 0)))
+(check! #(= (cell-range [1 1] [2 3]) (set %)))
 
 
 ;;; High-level interface and undo/redo
-(defn show-statuses [{:keys [row-stack col-stack trail]}]
-  {:row  (mapv :active row-stack)
-   :col  (mapv :active col-stack)
+(defn show-statuses [{:keys [transformations trail]}]
+  {:row (mapv :active (nth transformations 0))
+   :col (mapv :active (nth transformations 1))
    :last (:last-active trail)})
 
-(def test-graph-map
-  (-> (make)
-      (insert-columns 2 3)
-      (move-rows 3 4 5)
-      (delete-columns 9 2)
-      (insert-rows 8 4)))
+(def test-chart
+  (-> (make-chart {:dimensions [:row :col]})
+      (operate :col {:action :insert :index 2 :count 3})
+      (operate :row {:action :move :index 3 :count 4 :offset 5})
+      (operate :col {:action :delete :index 9 :count 2})
+      (operate :row {:action :insert :index 8 :count 4})))
 
 (check! (fn [_]
-          (let [undone (->> test-graph-map (iterate undo) (take 5) reverse)]
+          (let [undone (->> test-chart (iterate undo) (take 5) reverse)]
             (= undone (->> undone first (iterate redo) (take 5))))))
 
-(->> test-graph-map (iterate undo) (take 6) (map show-statuses))
+(->> test-chart (iterate undo) (take 6) (map show-statuses))
 (check! #{[{:row [true  true]  :col [true  true]  :last 3}
            {:row [true  false] :col [true  true]  :last 2}
            {:row [true  false] :col [true  false] :last 1}
@@ -448,7 +406,8 @@
            {:row [false false] :col [false false] :last -1}
            {:row [false false] :col [false false] :last -1}]})
 
-(->> test-graph-map (iterate undo) (drop 6) first
+(->> test-chart
+     (iterate undo) (drop 6) first
      (iterate redo) (take 6)
      (map show-statuses))
 (check! #{[{:row [false false] :col [false false] :last -1}
@@ -459,17 +418,11 @@
            {:row [true true]   :col [true true]   :last 3}]})
 
 ;;; New operations truncate undone ones
-(-> test-graph-map undo undo redo
-    (move-columns 8 2 -3) (delete-rows 5 1)
+(-> test-chart undo undo redo
+    (operate :col {:action :move :index 8 :count 2 :offset -3})
+    (operate :row {:action :delete :index 5 :count 1})
     ;; no amount of `redo` can bring back the undone row operation
     redo redo redo redo redo redo
     ((juxt show-statuses :trail)))
-(check! #{[{:row  [true false true]
-            :col  [true true true]
-            :last 4}
-           {:op-pointers [[:col-stack 0]
-                          [:row-stack 0]
-                          [:col-stack 1]
-                          [:col-stack 2]
-                          [:row-stack 2]]
-            :last-active 4}]})
+(check! #{[{:row [true false true] :col [true true true] :last 4}
+           {:op-pointers [[1 0] [0 0] [1 1] [1 2] [0 2]] :last-active 4}]})

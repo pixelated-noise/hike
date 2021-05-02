@@ -1,5 +1,6 @@
 (ns sherpa.core
-  (:require [clojure.spec.alpha :as s]))
+  (:require [clojure.spec.alpha :as s]
+            [clojure.math.combinatorics :as comb]))
 
 ;;; Low-level transformations
 (defn- split [{:keys [index count]}]
@@ -103,207 +104,125 @@
 
 ;;; Spec provided here as an overview
 (s/def ::id (s/and integer? (complement neg?)))
+(s/def ::layout ::id)
+(s/def ::position ::id)
 
-(s/def ::node
-  (s/keys :req-un [::sheet ::row-layout ::row-pos ::col-layout ::col-pos]))
-(s/def ::sheet ::id)
-(s/def ::row-layout ::id)
-(s/def ::row-pos ::id)
-(s/def ::col-layout ::id)
-(s/def ::col-pos ::id)
+;; A cell is defined by a set of position on each dimension
+(s/def ::cell (s/coll-of ::position))
 
-(s/def ::slice (s/keys :req-un [::start ::end]))
+;; A node coordinate also specifies the layout for each dimension
+(s/def ::node-coordinate (s/cat :layout ::id :position ::id))
+(s/def ::node (s/coll-of ::node-coordinate))
+
+;; A slice is defined by its node boundaries
 (s/def ::start ::node)
 (s/def ::end ::node)
+(s/def ::slice (s/keys :req-un [::start ::end]))
 
-(s/def ::cell (s/keys :req-un [::sheet ::row ::col]))
-(s/def ::row ::id)
-(s/def ::col ::id)
-
-(s/def ::graph-map (s/keys :req-un [::row-stack ::col-stack ::trail]))
-(s/def ::transformation-stack (s/coll-of ::transformation))
-(s/def ::row-stack ::transformation-stack)
-(s/def ::col-stack ::transformation-stack)
-(s/def ::trail (s/keys :req-un [::op-pointers ::last-active]))
-(s/def ::last-active integer?)
-(s/def ::op-pointers (s/coll-of ::op-pointer))
-(s/def ::op-pointer (s/cat :target #{:row-stack :col-stack}
-                           :index ::id))
-
-(s/def ::transformation
-  (s/keys :req-un [::to-grid ::to-graph ::operation ::active]))
+;; Operations and transformations
 (s/def ::to-grid fn?)
 (s/def ::to-graph fn?)
-(s/def ::operation (s/keys :req-un [::action ::index ::count]
-                           :opt-un [::offset]))
 (s/def ::action #{:insert :delete :move})
 (s/def ::index ::id)
 (s/def ::count ::id)
 (s/def ::offset integer?)
+(s/def ::operation (s/keys :req-un [::action ::index ::count]
+                           :opt-un [::offset]))
 (s/def ::active boolean?)
+(s/def ::transformation
+  (s/keys :req-un [::to-grid ::to-graph ::operation ::active]))
 
-;;; Encoding/decoding via byte-interleaving pairing functions.
-
-;;; The `java.util.Arrays/copyOf` method won't do, since we need low padding
-(defn- zero-pad [ba new-size]
-  ;; this being private, it's safe to assume that `new-size` > `(alength ba)`
-  (let [old-size (alength ba)
-        bba      (byte-array new-size (byte 0))]
-    ;; (Object src, int srcPos, Object dest, int destPos, int length)
-    (System/arraycopy ba 0 bba (- new-size old-size) old-size)
-    bba))
-
-(defn- pair [[m n]]
-  (let [m-ba   (-> m biginteger .toByteArray)
-        n-ba   (-> n biginteger .toByteArray)
-        m-size (alength m-ba)
-        n-size (alength n-ba)]
-    (->> (cond (< m-size n-size) [(zero-pad m-ba n-size) n-ba]
-               (= m-size n-size) [m-ba n-ba]
-               (> m-size n-size) [m-ba (zero-pad n-ba m-size)])
-         (apply interleave)
-         byte-array
-         biginteger)))
-
-(defn- unpair [p]
-  (let [ba (->> p biginteger .toByteArray)
-        ;; pad byte-array with zeros to an even total length
-        bseq (if (odd? (alength ba))
-               (concat [0 0 0] ba)
-               (concat [0 0] ba))]
-    (map (comp biginteger byte-array)
-         [(take-nth 2 bseq) (take-nth 2 (drop 1 bseq))])))
-
-(defn- encode [{:keys [sheet row-layout row-pos col-layout col-pos]}]
-  "Encodes the supplied nonnegative `coordinates` into a natural number."
-  (pair [sheet (pair [(pair [row-layout row-pos])
-                      (pair [col-layout col-pos])])]))
-
-(defn- decode [code]
-  "Decodes the coordinates from the supplied nonnegative `code`."
-  (let [[sheet row-col-code] (unpair code)
-        [row-code col-code]  (unpair row-col-code)
-        [row-layout row-pos] (unpair row-code)
-        [col-layout col-pos] (unpair col-code)]
-    {:sheet      sheet
-     :row-layout row-layout
-     :row-pos    row-pos
-     :col-layout col-layout
-     :col-pos    col-pos}))
+;; Transformations stack and chart
+(s/def ::transformation-stack (s/coll-of ::transformation))
+(s/def ::transformations (s/coll-of ::transformation-stack))
+(s/def ::op-pointer (s/cat :dimension ::id :index ::id))
+(s/def ::op-pointers (s/coll-of ::op-pointer))
+(s/def ::last-active (s/or :none #{-1} :id ::id))
+(s/def ::trail (s/keys :req-un [::op-pointers ::last-active]))
+(s/def ::dimensions (s/coll-of keyword?))
+(s/def ::chart (s/keys :req-un [::transformations ::trail
+                                ::encoder ::decoder]
+                       :opt-un [::dimensions]))
 
 ;;; Conversion between nodes and cells
 (defn- node->cell
-  ([node graph-map]
-   (node->cell node graph-map nil))
-  ([{:keys [sheet row-layout row-pos col-layout col-pos]}
-    {:keys [row-stack col-stack]}
-    bypass]
-   (when-let [row (graph->grid row-stack [row-layout row-pos] bypass)]
-     (when-let [col (graph->grid col-stack [col-layout col-pos] bypass)]
-       {:sheet sheet :row row :col col}))))
+  ([node chart]
+   (node->cell node chart nil))
+  ([node {:keys [transformations]} bypass]
+   (reduce (fn [position [node-coordinate tf-stack]]
+             (if-let [pos-coord (graph->grid tf-stack node-coordinate bypass)]
+               (conj position pos-coord)
+               (reduced nil)))
+           []
+           (map vector node transformations))))
 
-(defn- slice->cells [{:keys [start end]} graph-map]
-  (let [{sr :row sc :col ss :sheet} (node->cell start graph-map :max)
-        {er :row ec :col es :sheet} (node->cell end graph-map :min)]
-    (assert (= es ss))
-    (for [row (range sr (inc er))
-          col (range sc (inc ec))]
-      {:sheet es :row row :col col})))
+(defn- slice->cells [{:keys [start end]} chart]
+  (let [start  (node->cell start chart :max)
+        end    (node->cell end chart :min)
+        ranges (->> (map inc end) (map range start))]
+    (apply comb/cartesian-product ranges)))
 
-(defn- cell->node [{:keys [sheet row col]} {:keys [row-stack col-stack]}]
-  (let [[row-layout row-pos] (grid->graph row-stack row)
-        [col-layout col-pos] (grid->graph col-stack col)]
-    {:sheet      sheet
-     :row-layout row-layout
-     :row-pos    row-pos
-     :col-layout col-layout
-     :col-pos    col-pos}))
+(defn- cell->node [cell {:keys [transformations]}]
+  (map grid->graph transformations cell))
 
 ;;; Public API
 (defn node-id->cell
-  "Returns the cell for `node` according to the `graph-map` in effect,
+  "Returns the cell for `node` according to the `chart` in effect,
   `nil` if not visible. Can be used for slice edges by specifycing the
   appropriate `bypass` direction."
-  [node-id graph-map]
-  (-> node-id decode (node->cell graph-map)))
+  [node-id {:keys [decoder] :as chart}]
+  (-> node-id decoder (node->cell chart)))
 
 (defn slice-ids->cells
-  "Returns the `slice`'s cells according to `graph-map` in effect."
-  [{:keys [start end]} graph-map]
-  (slice->cells {:start (decode start) :end (decode end)} graph-map))
+  "Returns the `slice`'s cells according to `chart` in effect."
+  [{:keys [start end]} {:keys [decoder] :as chart}]
+  (slice->cells {:start (decoder start) :end (decoder end)} chart))
 
-(defn cell->node-id [cell graph-map]
-  "Returns the node for `cell` according to the `graph-map` in effect."
-  (-> cell (cell->node graph-map) encode))
+(defn cell->node-id [cell {:keys [encoder] :as chart}]
+  "Returns the node for `cell` according to the `chart` in effect."
+  (-> cell (cell->node chart) encoder))
 
-(defn make []
-  {:row-stack (make-transformation-stack)
-   :col-stack (make-transformation-stack)
-   :trail     {:op-pointers []
-               :last-active -1}})
+(defn make-chart [{:keys [dimensions dimensionality encoder decoder]
+                   :or   {encoder identity decoder identity}}]
+  (cond-> {:transformations (vec (repeat (if (seq dimensions)
+                                           (count dimensions)
+                                           dimensionality)
+                                         (make-transformation-stack)))
+           :trail           {:op-pointers []
+                             :last-active -1}
+           :encoder         encoder
+           :decoder         decoder}
+    dimensions (assoc :dimensions dimensions)))
 
-(defn- truncate-undone [{{:keys [op-pointers last-active]} :trail
-                         :as                               graph-map}]
-  (assoc-in graph-map
+(defn- truncate-undone [{{:keys [op-pointers last-active]} :trail :as chart}]
+  (assoc-in chart
             [:trail :op-pointers]
             (subvec op-pointers 0 (inc last-active))))
 
-(defn- operate [graph-map target-stack operation]
-  (let [target-count (count (get graph-map target-stack))]
-    (-> graph-map
+(defn operate
+  [{:keys [dimensions transformations] :as chart} dimension operation]
+  (let [index    (if dimensions
+                   (.indexOf dimensions dimension)
+                   dimension)
+        tf-count (count (nth transformations index))]
+    (-> chart
         truncate-undone
-        (update target-stack push operation)
-        (update-in [:trail :op-pointers]
-                   conj
-                   [target-stack target-count])
+        (update-in [:transformations index] push operation)
+        (update-in [:trail :op-pointers] conj [index tf-count])
         (update-in [:trail :last-active] inc))))
 
-(defn insert-rows [graph-map index count]
-  (operate graph-map :row-stack {:action :insert
-                                 :index  index
-                                 :count  count}))
-
-(defn move-rows [graph-map index count offset]
-  (operate graph-map :row-stack {:action :move
-                                 :index  index
-                                 :count  count
-                                 :offset offset}))
-
-(defn delete-rows [graph-map index count]
-  (operate graph-map :row-stack {:action :delete
-                                 :index  index
-                                 :count  count}))
-
-(defn insert-columns [graph-map index count]
-  (operate graph-map :col-stack {:action :insert
-                                 :index  index
-                                 :count  count}))
-
-(defn move-columns [graph-map index count offset]
-  (operate graph-map :col-stack {:action :move
-                                 :index  index
-                                 :count  count
-                                 :offset offset}))
-
-(defn delete-columns [graph-map index count]
-  (operate graph-map :col-stack {:action :delete
-                                 :index  index
-                                 :count  count}))
-
-(defn undo [{{:keys [op-pointers last-active]} :trail
-             :as                               graph-map}]
+(defn undo [{{:keys [op-pointers last-active]} :trail :as chart}]
   ;; check that there is some operation to undo
-  (if (neg? last-active) graph-map
-      (let [[target-stack index] (get op-pointers last-active)]
-        (-> graph-map
-            (update target-stack disable index)
+  (if (neg? last-active) chart
+      (let [[dim-id tf-id] (get op-pointers last-active)]
+        (-> chart
+            (update-in [:transformations dim-id] disable tf-id)
             (update-in [:trail :last-active] dec)))))
 
-(defn redo [{{:keys [last-active op-pointers]} :trail
-             :as                               graph-map}]
+(defn redo [{{:keys [last-active op-pointers]} :trail :as chart}]
   ;; get the operation *after* `last-active`
-  (if-let [[target-stack index] (get op-pointers (inc last-active))]
-    (-> graph-map
-        (update target-stack enable index)
+  (if-let [[dim-id tf-id] (get op-pointers (inc last-active))]
+    (-> chart
+        (update-in [:transformations dim-id] enable tf-id)
         (update-in [:trail :last-active] inc))
-    graph-map))
+    chart))

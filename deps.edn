@@ -1,7 +1,9 @@
 {:paths ["src"]
- :deps  {org.clojure/clojure    {:mvn/version "1.10.3"}
-         org.clojure/spec.alpha {:mvn/version "0.2.194"}}
+ :deps  {org.clojure/clojure            {:mvn/version "1.10.3"}
+         org.clojure/spec.alpha         {:mvn/version "0.2.194"}
+         org.clojure/math.combinatorics {:mvn/version "0.1.6"}}
  :aliases
  {:dev {:extra-paths ["test"]
         :extra-deps  {org.clojure/tools.namespace {:mvn/version "1.0.0"}
+                      criterium/criterium         {:mvn/version "0.4.6"}
                       com.cognitect/transcriptor  {:mvn/version "0.1.5"}}}}}
