@@ -166,32 +166,36 @@
 
 ;;; Public API
 (defn node-id->cell
-  "Returns the cell for `node` according to the `chart` in effect,
-  `nil` if not visible. Can be used for slice edges by specifycing the
-  appropriate `bypass` direction."
+  "Returns the cell for `node-id` according to `chart`, `nil` if not visible."
   [node-id {:keys [decoder] :as chart}]
   (-> node-id decoder (node->cell chart)))
 
 (defn slice-ids->cells
-  "Returns the `slice`'s cells according to `chart` in effect."
+  "Returns the `slice`'s cells according to `chart`."
   [{:keys [start end]} {:keys [decoder] :as chart}]
   (slice->cells {:start (decoder start) :end (decoder end)} chart))
 
 (defn cell->node-id [cell {:keys [encoder] :as chart}]
-  "Returns the node for `cell` according to the `chart` in effect."
+  "Returns the node ID for `cell` according to `chart`."
   (-> cell (cell->node chart) encoder))
 
-(defn make-chart [{:keys [dimensions dimensionality encoder decoder]
-                   :or   {encoder identity decoder identity}}]
-  (cond-> {:transformations (vec (repeat (if (seq dimensions)
-                                           (count dimensions)
-                                           dimensionality)
+(defn make-chart
+  "Construct a multi-dimensional chart. If `dimension-names` are supplied,
+  dimensions are named, otherwise anonymous. Iff anonymous, their number is
+  defined by `dimension-count`. The `encoder`/`decoder` functions convert
+  nodes to/from identifiers for the graph storage backend (both default to
+  `identity`)."
+  [{:keys [dimension-names dimension-count encoder decoder]
+    :or   {encoder identity decoder identity}}]
+  (cond-> {:transformations (vec (repeat (if (seq dimension-names)
+                                           (count dimension-names)
+                                           dimension-count)
                                          (make-transformation-stack)))
            :trail           {:op-pointers []
                              :last-active -1}
            :encoder         encoder
            :decoder         decoder}
-    dimensions (assoc :dimensions dimensions)))
+    dimension-names (assoc :dimensions dimension-names)))
 
 (defn- truncate-undone [{{:keys [op-pointers last-active]} :trail :as chart}]
   (assoc-in chart
@@ -199,6 +203,9 @@
             (subvec op-pointers 0 (inc last-active))))
 
 (defn operate
+  "Adds the `operation` on the specified `dimension` to `chart`. For charts with
+  named dimensions, `dimension` is a name, otherwise an index. Discards any
+  previously undone operations."
   [{:keys [dimensions transformations] :as chart} dimension operation]
   (let [index    (if dimensions
                    (.indexOf dimensions dimension)
@@ -210,7 +217,9 @@
         (update-in [:trail :op-pointers] conj [index tf-count])
         (update-in [:trail :last-active] inc))))
 
-(defn undo [{{:keys [op-pointers last-active]} :trail :as chart}]
+(defn undo
+  "Deactivates the last active operation in `chart`, if any."
+  [{{:keys [op-pointers last-active]} :trail :as chart}]
   ;; check that there is some operation to undo
   (if (neg? last-active) chart
       (let [[dim-id tf-id] (get op-pointers last-active)]
@@ -218,7 +227,9 @@
             (update-in [:transformations dim-id] disable tf-id)
             (update-in [:trail :last-active] dec)))))
 
-(defn redo [{{:keys [last-active op-pointers]} :trail :as chart}]
+(defn redo
+  "Reactivates the last deactivated operation in `chart`, if any."
+  [{{:keys [last-active op-pointers]} :trail :as chart}]
   ;; get the operation *after* `last-active`
   (if-let [[dim-id tf-id] (get op-pointers (inc last-active))]
     (-> chart
