@@ -129,15 +129,16 @@
                            :opt-un [::offset]))
 (s/def ::active boolean?)
 (s/def ::transformation
-  (s/keys :req-un [::to-grid ::to-graph ::operation ::active]))
+  (s/keys :req-un [::to-grid ::to-graph ::active]
+          :opt-un [::operation]))
 
 ;; Transformations stack and chart
 (s/def ::transformation-stack (s/coll-of ::transformation))
 (s/def ::transformations (s/coll-of ::transformation-stack))
-(s/def ::op-pointer (s/cat :dimension ::id :index ::id))
-(s/def ::op-pointers (s/coll-of ::op-pointer))
+(s/def ::operation-pointer (s/cat :dimension ::id :index ::id))
+(s/def ::operation-pointers (s/coll-of ::operation-pointer))
 (s/def ::last-active (s/or :none #{-1} :id ::id))
-(s/def ::trail (s/keys :req-un [::op-pointers ::last-active]))
+(s/def ::trail (s/keys :req-un [::operation-pointers ::last-active]))
 (s/def ::dimensions (s/coll-of keyword?))
 (s/def ::chart (s/keys :req-un [::transformations ::trail
                                 ::encoder ::decoder]
@@ -191,16 +192,17 @@
                                            (count dimension-names)
                                            dimension-count)
                                          (make-transformation-stack)))
-           :trail           {:op-pointers []
+           :trail           {:operation-pointers []
                              :last-active -1}
            :encoder         encoder
            :decoder         decoder}
     dimension-names (assoc :dimensions dimension-names)))
 
-(defn- truncate-undone [{{:keys [op-pointers last-active]} :trail :as chart}]
+(defn- truncate-undone
+  [{{:keys [operation-pointers last-active]} :trail :as chart}]
   (assoc-in chart
-            [:trail :op-pointers]
-            (subvec op-pointers 0 (inc last-active))))
+            [:trail :operation-pointers]
+            (subvec operation-pointers 0 (inc last-active))))
 
 (defn operate
   "Adds the `operation` on the specified `dimension` to `chart`. For charts with
@@ -214,24 +216,24 @@
     (-> chart
         truncate-undone
         (update-in [:transformations index] push operation)
-        (update-in [:trail :op-pointers] conj [index tf-count])
+        (update-in [:trail :operation-pointers] conj [index tf-count])
         (update-in [:trail :last-active] inc))))
 
 (defn undo
   "Deactivates the last active operation in `chart`, if any."
-  [{{:keys [op-pointers last-active]} :trail :as chart}]
+  [{{:keys [operation-pointers last-active]} :trail :as chart}]
   ;; check that there is some operation to undo
   (if (neg? last-active) chart
-      (let [[dim-id tf-id] (get op-pointers last-active)]
+      (let [[dim-id tf-id] (get operation-pointers last-active)]
         (-> chart
             (update-in [:transformations dim-id] disable tf-id)
             (update-in [:trail :last-active] dec)))))
 
 (defn redo
   "Reactivates the last deactivated operation in `chart`, if any."
-  [{{:keys [last-active op-pointers]} :trail :as chart}]
+  [{{:keys [last-active operation-pointers]} :trail :as chart}]
   ;; get the operation *after* `last-active`
-  (if-let [[dim-id tf-id] (get op-pointers (inc last-active))]
+  (if-let [[dim-id tf-id] (get operation-pointers (inc last-active))]
     (-> chart
         (update-in [:transformations dim-id] enable tf-id)
         (update-in [:trail :last-active] inc))

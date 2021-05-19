@@ -425,4 +425,5 @@
     redo redo redo redo redo redo
     ((juxt show-statuses :trail)))
 (check! #{[{:row [true false true] :col [true true true] :last 4}
-           {:op-pointers [[1 0] [0 0] [1 1] [1 2] [0 2]] :last-active 4}]})
+           {:operation-pointers [[1 0] [0 0] [1 1] [1 2] [0 2]]
+            :last-active        4}]})
