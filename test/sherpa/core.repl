@@ -417,7 +417,7 @@
            {:row [true true]   :col [true true]   :last 3}
            {:row [true true]   :col [true true]   :last 3}]})
 
-;;; New operations truncate undone ones
+;;; New operations discard undone ones
 (-> test-chart undo undo redo
     (operate :col {:action :move :index 8 :count 2 :offset -3})
     (operate :row {:action :delete :index 5 :count 1})

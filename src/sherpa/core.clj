@@ -166,6 +166,24 @@
   (map grid->graph transformations cell))
 
 ;;; Public API
+(defn make-chart
+  "Construct a multi-dimensional chart. If `dimension-names` are supplied,
+  dimensions are named, otherwise anonymous. Iff anonymous, their number is
+  defined by `dimension-count`. The `encoder`/`decoder` functions convert
+  nodes to/from identifiers for the graph storage backend (both default to
+  `identity`)."
+  [{:keys [dimension-names dimension-count encoder decoder]
+    :or   {encoder identity decoder identity}}]
+  (cond-> {:transformations (vec (repeat (if (seq dimension-names)
+                                           (count dimension-names)
+                                           dimension-count)
+                                         (make-transformation-stack)))
+           :trail           {:operation-pointers []
+                             :last-active        -1}
+           :encoder         encoder
+           :decoder         decoder}
+    dimension-names (assoc :dimensions dimension-names)))
+
 (defn node-id->cell
   "Returns the cell for `node-id` according to `chart`, `nil` if not visible."
   [node-id {:keys [decoder] :as chart}]
@@ -180,25 +198,7 @@
   "Returns the node ID for `cell` according to `chart`."
   (-> cell (cell->node chart) encoder))
 
-(defn make-chart
-  "Construct a multi-dimensional chart. If `dimension-names` are supplied,
-  dimensions are named, otherwise anonymous. Iff anonymous, their number is
-  defined by `dimension-count`. The `encoder`/`decoder` functions convert
-  nodes to/from identifiers for the graph storage backend (both default to
-  `identity`)."
-  [{:keys [dimension-names dimension-count encoder decoder]
-    :or   {encoder identity decoder identity}}]
-  (cond-> {:transformations (vec (repeat (if (seq dimension-names)
-                                           (count dimension-names)
-                                           dimension-count)
-                                         (make-transformation-stack)))
-           :trail           {:operation-pointers []
-                             :last-active -1}
-           :encoder         encoder
-           :decoder         decoder}
-    dimension-names (assoc :dimensions dimension-names)))
-
-(defn- truncate-undone
+(defn- discard-undone
   [{{:keys [operation-pointers last-active]} :trail :as chart}]
   (assoc-in chart
             [:trail :operation-pointers]
@@ -214,7 +214,7 @@
                    dimension)
         tf-count (count (nth transformations index))]
     (-> chart
-        truncate-undone
+        discard-undone
         (update-in [:transformations index] push operation)
         (update-in [:trail :operation-pointers] conj [index tf-count])
         (update-in [:trail :last-active] inc))))
