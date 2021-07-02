@@ -19,7 +19,7 @@
                                  bypass)
             :else           (- n count)))))
 
-(defn- cross [{:keys [index count offset] :as tf}]
+(defn- cross [{:keys [index count offset]}]
   (assert (pos? offset))
   ;; `n` passes through if outside the non-inclusive (`min-pass`, `max-pass`)
   ;; interval, `cross-index` marks the start of the complementary cell group.
@@ -32,8 +32,8 @@
             :else                                (- n count)))))
 
 ;;; Bidirectional transformations
-(defn- normalize-move [{:keys [index count offset] :as tf}]
-  (if (pos? offset) tf
+(defn- normalize-move [{:keys [index count offset] :as op}]
+  (if (pos? offset) op
       {:index  (+ index offset)
        :count  (- offset)
        :offset count}))
@@ -119,14 +119,22 @@
 (s/def ::slice (s/keys :req-un [::start ::end]))
 
 ;; Operations and transformations
-(s/def ::to-grid fn?)
-(s/def ::to-graph fn?)
 (s/def ::action #{:insert :delete :move})
 (s/def ::index ::id)
 (s/def ::count ::id)
 (s/def ::offset integer?)
-(s/def ::operation (s/keys :req-un [::action ::index ::count]
-                           :opt-un [::offset]))
+
+(defmulti operation :action)
+(defmethod operation :insert [_]
+  (s/keys :req-un [::action ::index ::count]))
+(defmethod operation :delete [_]
+  (s/keys :req-un [::action ::index ::count]))
+(defmethod operation :move [_]
+  (s/keys :req-un [::action ::index ::count ::offset]))
+(s/def ::operation (s/multi-spec operation :action))
+
+(s/def ::to-grid fn?)
+(s/def ::to-graph fn?)
 (s/def ::active boolean?)
 (s/def ::transformation
   (s/keys :req-un [::to-grid ::to-graph ::active]
