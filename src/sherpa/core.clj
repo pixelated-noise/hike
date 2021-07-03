@@ -124,7 +124,7 @@
 (s/def ::count ::id)
 (s/def ::offset integer?)
 
-(defmulti operation :action)
+(defmulti ^:private operation :action)
 (defmethod operation :insert [_]
   (s/keys :req-un [::action ::index ::count]))
 (defmethod operation :delete [_]
@@ -153,6 +153,9 @@
                        :opt-un [::dimensions]))
 
 ;;; Conversion between nodes and cells
+(defn- cell->node [cell {:keys [transformations]}]
+  (map grid->graph transformations cell))
+
 (defn- node->cell
   ([node chart]
    (node->cell node chart nil))
@@ -169,9 +172,6 @@
         end    (node->cell end chart :min)
         ranges (->> (map inc end) (map range start))]
     (apply comb/cartesian-product ranges)))
-
-(defn- cell->node [cell {:keys [transformations]}]
-  (map grid->graph transformations cell))
 
 ;;; Public API
 (defn make-chart
