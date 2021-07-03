@@ -101,6 +101,27 @@
      (cond (active? layout) (to-grid node)
            bypass           (-> node to-active to-grid)))))
 
+;;; Conversion between nodes and cells
+(defn- cell->node [cell {:keys [transformations]}]
+  (map grid->graph transformations cell))
+
+(defn- node->cell
+  ([node chart]
+   (node->cell node chart nil))
+  ([node {:keys [transformations]} bypass]
+   (reduce (fn [position [node-coordinate tf-stack]]
+             (if-let [pos-coord (graph->grid tf-stack node-coordinate bypass)]
+               (conj position pos-coord)
+               (reduced nil)))
+           []
+           (map vector node transformations))))
+
+(defn- slice->cells [{:keys [start end]} chart]
+  (let [start  (node->cell start chart :max)
+        end    (node->cell end chart :min)
+        ranges (->> (map inc end) (map range start))]
+    (apply comb/cartesian-product ranges)))
+
 ;;; Spec provided here as an overview
 (s/def ::id (s/and integer? (complement neg?)))
 (s/def ::layout ::id)
@@ -151,27 +172,6 @@
 (s/def ::chart (s/keys :req-un [::transformations ::trail
                                 ::encoder ::decoder]
                        :opt-un [::dimensions]))
-
-;;; Conversion between nodes and cells
-(defn- cell->node [cell {:keys [transformations]}]
-  (map grid->graph transformations cell))
-
-(defn- node->cell
-  ([node chart]
-   (node->cell node chart nil))
-  ([node {:keys [transformations]} bypass]
-   (reduce (fn [position [node-coordinate tf-stack]]
-             (if-let [pos-coord (graph->grid tf-stack node-coordinate bypass)]
-               (conj position pos-coord)
-               (reduced nil)))
-           []
-           (map vector node transformations))))
-
-(defn- slice->cells [{:keys [start end]} chart]
-  (let [start  (node->cell start chart :max)
-        end    (node->cell end chart :min)
-        ranges (->> (map inc end) (map range start))]
-    (apply comb/cartesian-product ranges)))
 
 ;;; Public API
 (defn make-chart
