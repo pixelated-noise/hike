@@ -34,10 +34,10 @@
 (check! #{[1 nil nil nil nil 2 3 4 5 6]})
 
 
-;;; Deletion creates a to-graph split and a to-grid dead-end. Asking for the
-;;; coordinates of the cells 1-10 after deleting 2 at position 4 (i.e. the
+;;; Removal creates a to-graph split and a to-grid dead-end. Asking for the
+;;; coordinates of the cells 1-10 after removing 2 at position 4 (i.e. the
 ;;; first new cell will be at 2).
-(map (-> {:action :delete :index 4 :count 2}
+(map (-> {:action :remove :index 4 :count 2}
          make-transformation
          :to-grid)
      (range 1 11))
@@ -46,9 +46,9 @@
 ;;; and the rest correspond to 2 positions to the left.
 (check! #{[1 2 3 nil nil 4 5 6 7 8]})
 
-;;; The same deletion as above (2 cells at 4), but now asking for the *old*
+;;; The same removal as above (2 cells at 4), but now asking for the *old*
 ;;; coordinates of cells 1-10 in the *new* grid.
-(map (-> {:action :delete :index 4 :count 2}
+(map (-> {:action :remove :index 4 :count 2}
          make-transformation
          :to-graph)
      (range 1 11))
@@ -132,7 +132,7 @@
       (push {:action :insert
              :index 2
              :count 10})
-      (push {:action :delete
+      (push {:action :remove
              :index 4
              :count 3})))
 
@@ -149,9 +149,9 @@
 (check! #{[[0 1] [1 2] [1 3] [1 7] [1 8] [1 9] [1 10] [1 11] [0 2] [0 3]]})
 
 
-;;; Scenario 1: Disable deletion
+;;; Scenario 1: Disable removal
 
-;;; If we disable the deletion, we get the following mapping:
+;;; If we disable the removal, we get the following mapping:
 (map #(grid->graph (disable test-tf-stack 1) %) (range 1 11))
 (check! #{[[0 1] [1 2] [1 3] [1 4] [1 5] [1 6] [1 7] [1 8] [1 9] [1 10]]})
 
@@ -173,7 +173,7 @@
                   [[1 3] [1 4] [1 5] [1 6] [1 7]])
              [3 4 4 4 4])))
 
-;;; After the deletion disable, these nodes return back to their place:
+;;; After the removal disable, these nodes return back to their place:
 (check! (fn [_] (= (map #(graph->grid (disable test-tf-stack 1) %)
                         [[1 3] [1 4] [1 5] [1 6] [1 7]])
                    [3 4 5 6 7])))
@@ -203,7 +203,7 @@
 
 ;;; Still, if any node of the deactivated layout 1 is a slice edge, we can
 ;;; meaningfully resolve it to positions in the current toplevel layout by
-;;; specifying a bypass direction (note the deletion higher in the
+;;; specifying a bypass direction (note the removal higher in the
 ;;; transformation stack):
 (map #(-> test-tf-stack
           (disable 0)
@@ -224,7 +224,7 @@
 (map #(grid->graph test-tf-stack %) (range 1 11))
 (check! #{[[0 1] [1 2] [1 3] [1 7] [1 8] [1 9] [1 10] [1 11] [0 2] [0 3]]})
 
-;;; After both the insertion and deletion, we refer to the 2:5 slice...
+;;; After both the insertion and removal, we refer to the 2:5 slice...
 (map #(grid->graph test-tf-stack %) (range 2 6))
 (check! #{[[1 2] [1 3] [1 7] [1 8]]})
 
@@ -232,8 +232,8 @@
 (map #(graph->grid test-tf-stack %) [[1 2] [1 3] [1 7] [1 8]])
 (check! #{(range 2 6)})
 
-;;; If we disable the deletion (which removed the nodes [1 4] [1 5] and [1 6])
-;;; and query that slice's edges, the undeleted cells resurface:
+;;; If we disable the removal (which removed the nodes [1 4] [1 5] and [1 6])
+;;; and query that slice's edges, the unremoved cells resurface:
 [(-> test-tf-stack (graph->grid [1 2] :max))
  (-> test-tf-stack (graph->grid [1 8] :min))]
 (check! #{[2 5]})
@@ -252,8 +252,8 @@
  (-> test-tf-stack (disable 1) (disable 0) (graph->grid [1 8] :min))]
 (check! #{[2 1]})
 
-;;; Slice from initial layout origin to a inserted, then deleted cell (0 =
-;;; insertion, 1 = deletion):
+;;; Slice from initial layout origin to a inserted, then removed cell (0 =
+;;; insertion, 1 = removal):
 [(-> test-tf-stack (graph->grid [0 1] :max))
  (-> test-tf-stack (graph->grid [1 5] :min))]
 (check! #{[1 3]})
@@ -278,17 +278,17 @@
  (-> test-tf-stack (graph->grid [0 6] :min))]
 (check! #{[11 13]})
 
-;;; Undid deletion
+;;; Undid removal
 [(-> test-tf-stack (disable 1) (graph->grid [0 4] :max))
  (-> test-tf-stack (disable 1) (graph->grid [0 6] :min))]
 (check! #{[14 16]})
 
-;;; Undid both insertion and deletion
+;;; Undid both insertion and removal
 [(-> test-tf-stack (disable 0) (disable 1) (graph->grid [0 4]))
  (-> test-tf-stack (disable 0) (disable 1) (graph->grid [0 6]))]
 (check! #{[4 6]})
 
-;;; Undid insertion only: deletion removes initial layout cells instead of the
+;;; Undid insertion only: removal removes initial layout cells instead of the
 ;;; inserted ones (which are deactivated)
 (map #(grid->graph (disable test-tf-stack 0) %) (range 1 11))
 (check! #{[[0 1] [0 2] [0 3] [0 7] [0 8] [0 9] [0 10] [0 11] [0 12] [0 13]]})
@@ -310,9 +310,9 @@
 (def test-chart
   (-> (make-chart {:dimension-names [:row :col]})
       (operate :row {:action :insert :index 2 :count 10})
-      (operate :row {:action :delete :index 4 :count 3})
+      (operate :row {:action :remove :index 4 :count 3})
       (operate :col {:action :move :index 8 :count 10 :offset -3})
-      (operate :col {:action :delete :index 4 :count 3})))
+      (operate :col {:action :remove :index 4 :count 3})))
 
 ;; (defn show-node [id]
 ;;   (let [{:keys [sheet row-layout row-pos col-layout col-pos]} (decode id)]
@@ -328,13 +328,13 @@
 
 (node-id->cell [[0 5] [0 5]]
                (-> test-chart
-                   ;; disable deletions
+                   ;; disable removals
                    (update-in [:transformations 0] disable 1)
                    (update-in [:transformations 1] disable 1)))
 (check! #{[15 15]})
 
 ;;; The node vanishes if we disable the row insertion, the col move, or both
-;;; (its cell is subsequently deleted -- this is a case of non-hierarchical
+;;; (its cell is subsequently removed -- this is a case of non-hierarchical
 ;;; disable)
 (map (partial node-id->cell [[0 5] [0 5]])
      [(update-in test-chart [:transformations 0] disable 0)
@@ -350,7 +350,7 @@
 (check! #{[[[0 1] [0 1]] [[0 5] [0 5]]]})
 
 (map #(cell->node-id % (-> test-chart
-                           ;; disable deletions
+                           ;; disable removals
                            (update-in [:transformations 0] disable 1)
                            (update-in [:transformations 1] disable 1)))
      [[1 1] [15 15]])
@@ -366,7 +366,7 @@
 (slice-ids->cells {:start [[0 1] [0 1]]
                    :end   [[0 2] [0 5]]}
                   (-> test-chart
-                      ;; disable deletions
+                      ;; disable removals
                       (update-in [:transformations 0] disable 1)
                       (update-in [:transformations 1] disable 1)))
 (check! #(= (cell-range [1 1] [12 15]) (set %)))
@@ -391,7 +391,7 @@
   (-> (make-chart {:dimension-names [:row :col]})
       (operate :col {:action :insert :index 2 :count 3})
       (operate :row {:action :move :index 3 :count 4 :offset 5})
-      (operate :col {:action :delete :index 9 :count 2})
+      (operate :col {:action :remove :index 9 :count 2})
       (operate :row {:action :insert :index 8 :count 4})))
 
 (check! (fn [_]
@@ -420,7 +420,7 @@
 ;;; New operations discard undone ones
 (-> test-chart undo undo redo
     (operate :col {:action :move :index 8 :count 2 :offset -3})
-    (operate :row {:action :delete :index 5 :count 1})
+    (operate :row {:action :remove :index 5 :count 1})
     ;; no amount of `redo` can bring back the undone row operation
     redo redo redo redo redo redo
     ((juxt show-statuses :trail)))

@@ -41,7 +41,7 @@
 (defn- make-transformation [{:keys [action] :as op}]
   (condp = action
     :insert {:to-graph (dead-end op) :to-grid (split op)}
-    :delete {:to-graph (split op) :to-grid (dead-end op)}
+    :remove {:to-graph (split op) :to-grid (dead-end op)}
     ;; normalize the `move` (ensuring a positive `offset`) to enable swapping
     ;; of `count` with `offset` for the `to-graph` transformation
     :move   (let [{:keys [count offset] :as op} (normalize-move op)]
@@ -140,7 +140,7 @@
 (s/def ::slice (s/keys :req-un [::start ::end]))
 
 ;; Operations and transformations
-(s/def ::action #{:insert :delete :move})
+(s/def ::action #{:insert :remove :move})
 (s/def ::index ::id)
 (s/def ::count ::id)
 (s/def ::offset integer?)
@@ -148,7 +148,7 @@
 (defmulti ^:private operation :action)
 (defmethod operation :insert [_]
   (s/keys :req-un [::action ::index ::count]))
-(defmethod operation :delete [_]
+(defmethod operation :remove [_]
   (s/keys :req-un [::action ::index ::count]))
 (defmethod operation :move [_]
   (s/keys :req-un [::action ::index ::count ::offset]))
