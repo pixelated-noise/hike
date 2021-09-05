@@ -108,9 +108,9 @@
   ([origin chart]
    (origin->cell origin chart nil))
   ([origin {:keys [transformations]} bypass]
-   (reduce (fn [position [origin-coordinate tf-stack]]
-             (if-let [pos-coord (to-grid tf-stack origin-coordinate bypass)]
-               (conj position pos-coord)
+   (reduce (fn [cell-position [coordinate tf-stack]]
+             (if-let [position (to-grid tf-stack coordinate bypass)]
+               (conj cell-position position)
                (reduced nil)))
            []
            (map vector origin transformations))))
@@ -122,26 +122,25 @@
     (apply comb/cartesian-product ranges)))
 
 ;;; Spec provided here as an overview
-(s/def ::id (s/and integer? (complement neg?)))
-(s/def ::layout ::id)
-(s/def ::position ::id)
+(s/def ::nat (s/and integer? (complement neg?)))
+(s/def ::layout ::nat)
+(s/def ::position ::nat)
+(s/def ::coordinate (s/cat :layout ::nat :position ::nat))
 
-;; A cell is defined by a set of position on each dimension
-(s/def ::cell (s/coll-of ::position))
+;; A cell is defined by its position along each dimension
+(s/def ::cell-position (s/coll-of ::position))
+;; A coordinate specifies both the position and layout for each dimension
+(s/def ::cell (s/coll-of ::coordinate))
 
-;; A node coordinate also specifies the layout for each dimension
-(s/def ::node-coordinate (s/cat :layout ::id :position ::id))
-(s/def ::node (s/coll-of ::node-coordinate))
-
-;; A slice is defined by its node boundaries
-(s/def ::start ::node)
-(s/def ::end ::node)
+;; A slice is defined by its boundary coordinates
+(s/def ::start ::cell)
+(s/def ::end ::cell)
 (s/def ::slice (s/keys :req-un [::start ::end]))
 
 ;; Operations and transformations
 (s/def ::action #{:insert :remove :move})
-(s/def ::index ::id)
-(s/def ::count ::id)
+(s/def ::index ::nat)
+(s/def ::count ::nat)
 (s/def ::offset integer?)
 
 (defmulti ^:private operation :action)
@@ -163,9 +162,9 @@
 ;; Transformations stack and chart
 (s/def ::transformation-stack (s/coll-of ::transformation))
 (s/def ::transformations (s/coll-of ::transformation-stack))
-(s/def ::operation-pointer (s/cat :dimension ::id :index ::id))
+(s/def ::operation-pointer (s/cat :dimension ::nat :index ::nat))
 (s/def ::operation-pointers (s/coll-of ::operation-pointer))
-(s/def ::last-active (s/or :none #{-1} :id ::id))
+(s/def ::last-active (s/or :none #{-1} :id ::nat))
 (s/def ::trail (s/keys :req-un [::operation-pointers ::last-active]))
 (s/def ::dimensions (s/coll-of keyword?))
 (s/def ::chart (s/keys :req-un [::transformations ::trail
