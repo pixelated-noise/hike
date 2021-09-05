@@ -3,6 +3,9 @@
             [clojure.math.combinatorics :as comb]))
 
 ;;; Low-level transformations
+(s/def ::nat (s/and integer? (complement neg?)))
+(s/def ::position ::nat)
+
 (defn- split [{:keys [index count]}]
   (fn [n & _] (if (< n index) n (+ n count))))
 
@@ -32,41 +35,60 @@
             :else                                (- n count)))))
 
 ;;; Bidirectional transformations
+(s/def ::action #{:insert :remove :move})
+(s/def ::index ::nat)
+(s/def ::count ::nat)
+(s/def ::offset integer?)
+
+(defmulti ^:private operation :action)
+(defmethod operation :insert [_]
+  (s/keys :req-un [::action ::index ::count]))
+(defmethod operation :remove [_]
+  (s/keys :req-un [::action ::index ::count]))
+(defmethod operation :move [_]
+  (s/keys :req-un [::action ::index ::count ::offset]))
+(s/def ::operation (s/multi-spec operation :action))
+
 (defn- normalize-move [{:keys [index count offset] :as op}]
   (if (pos? offset) op
       {:index  (+ index offset)
        :count  (- offset)
        :offset count}))
 
+(s/def ::to-grid fn?)
+(s/def ::to-graph fn?)
+(s/def ::active boolean?)
+(s/def ::transformation
+  (s/keys :req-un [::to-grid ::to-graph ::active]
+          :opt-un [::operation]))
+
 (defn- make-transformation [{:keys [action] :as op}]
-  (condp = action
-    :insert {:to-graph (dead-end op) :to-grid (split op)}
-    :remove {:to-graph (split op) :to-grid (dead-end op)}
-    ;; normalize the `move` (ensuring a positive `offset`) to enable swapping
-    ;; of `count` with `offset` for the `to-graph` transformation
-    :move   (let [{:keys [count offset] :as op} (normalize-move op)]
-              {:to-graph (cross (merge op {:count  offset
-                                           :offset count}))
-               :to-grid  (cross op)})))
+  (-> (condp = action
+        :insert {:to-graph (dead-end op) :to-grid (split op)}
+        :remove {:to-graph (split op) :to-grid (dead-end op)}
+        ;; normalize the `move` (ensuring a positive `offset`) to enable
+        ;; swapping of `count` with `offset` for the `to-graph` transformation
+        :move   (let [{:keys [count offset] :as op} (normalize-move op)]
+                  {:to-graph (cross (merge op {:count  offset
+                                               :offset count}))
+                   :to-grid  (cross op)}))
+      (assoc :active true :operation op)))
 
 ;;; Transformation stacks
+(s/def ::transformation-stack (s/coll-of ::transformation))
 (defn- make-transformation-stack [] [])
-
-(defn- set-status [tf-stack base-layout status]
-  (assoc-in tf-stack [base-layout :active] status))
-
-(defn- disable [tf-stack base-layout]
-  (set-status tf-stack base-layout false))
-
-(defn- enable [tf-stack base-layout]
-  (set-status tf-stack base-layout true))
-
-(defn- push [tf-stack op]
-  (->> {:operation op :active true}
-       (merge (make-transformation op))
-       (conj tf-stack)))
+(defn- push [tf-stack op] (conj tf-stack (make-transformation op)))
+(defn- disable [tf-stack tf-id] (assoc-in tf-stack [tf-id :active] false))
+(defn- enable [tf-stack tf-id] (assoc-in tf-stack [tf-id :active] true))
 
 ;;; Threading through the stack
+(s/def ::layout ::nat)
+;; A cell's position is the collection of positions along each dimension
+(s/def ::cell-position (s/coll-of ::position))
+;; A coordinate along a dimension specifies both the position and layout
+(s/def ::coordinate (s/cat :layout ::nat :position ::nat))
+(s/def ::cell (s/coll-of ::coordinate))
+
 (defn- to-graph [tf-stack pos]
   (reduce (fn [[layout pos] {:keys [active to-graph]}]
             (if-not active
@@ -101,6 +123,9 @@
            bypass           (-> origin to-active to-grid)))))
 
 ;;; Tracing between origins and (visible) cells
+;; Storing a transformation stack for each dimension
+(s/def ::transformations (s/coll-of ::transformation-stack))
+
 (defn- cell->origin [cell {:keys [transformations]}]
   (map to-graph transformations cell))
 
@@ -115,53 +140,18 @@
            []
            (map vector origin transformations))))
 
+;; A slice is defined by its boundaries
+(s/def ::start ::cell)
+(s/def ::end ::cell)
+(s/def ::slice (s/keys :req-un [::start ::end]))
+
 (defn- slice-origins->cells [{:keys [start end]} chart]
   (let [start  (origin->cell start chart :max)
         end    (origin->cell end chart :min)
         ranges (->> (map inc end) (map range start))]
     (apply comb/cartesian-product ranges)))
 
-;;; Spec provided here as an overview
-(s/def ::nat (s/and integer? (complement neg?)))
-(s/def ::layout ::nat)
-(s/def ::position ::nat)
-(s/def ::coordinate (s/cat :layout ::nat :position ::nat))
-
-;; A cell is defined by its position along each dimension
-(s/def ::cell-position (s/coll-of ::position))
-;; A coordinate specifies both the position and layout for each dimension
-(s/def ::cell (s/coll-of ::coordinate))
-
-;; A slice is defined by its boundary coordinates
-(s/def ::start ::cell)
-(s/def ::end ::cell)
-(s/def ::slice (s/keys :req-un [::start ::end]))
-
-;; Operations and transformations
-(s/def ::action #{:insert :remove :move})
-(s/def ::index ::nat)
-(s/def ::count ::nat)
-(s/def ::offset integer?)
-
-(defmulti ^:private operation :action)
-(defmethod operation :insert [_]
-  (s/keys :req-un [::action ::index ::count]))
-(defmethod operation :remove [_]
-  (s/keys :req-un [::action ::index ::count]))
-(defmethod operation :move [_]
-  (s/keys :req-un [::action ::index ::count ::offset]))
-(s/def ::operation (s/multi-spec operation :action))
-
-(s/def ::to-grid fn?)
-(s/def ::to-graph fn?)
-(s/def ::active boolean?)
-(s/def ::transformation
-  (s/keys :req-un [::to-grid ::to-graph ::active]
-          :opt-un [::operation]))
-
-;; Transformations stack and chart
-(s/def ::transformation-stack (s/coll-of ::transformation))
-(s/def ::transformations (s/coll-of ::transformation-stack))
+;;; Public API
 (s/def ::operation-pointer (s/cat :dimension ::nat :index ::nat))
 (s/def ::operation-pointers (s/coll-of ::operation-pointer))
 (s/def ::last-active (s/or :none #{-1} :id ::nat))
@@ -171,7 +161,6 @@
                                 ::encoder ::decoder]
                        :opt-un [::dimensions]))
 
-;;; Public API
 (defn make-chart
   "Construct a multi-dimensional chart. If `dimension-names` are supplied,
   dimensions are named, otherwise anonymous. Iff anonymous, their number is
