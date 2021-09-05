@@ -49,9 +49,7 @@
                                            :offset count}))
                :to-grid  (cross op)})))
 
-;;; A stack of transformations between layouts. Every position in a layout is
-;;; uniquely mapped to a graph node. A grid->graph result contains the exit
-;;; layout, which is the entry point for the graph->grid direction.
+;;; Transformation stacks
 (defn- make-transformation-stack [] [])
 
 (defn- set-status [tf-stack base-layout status]
@@ -68,7 +66,8 @@
        (merge (make-transformation op))
        (conj tf-stack)))
 
-(defn- grid->graph [tf-stack pos]
+;;; Threading through the stack
+(defn- to-graph [tf-stack pos]
   (reduce (fn [[layout pos] {:keys [active to-graph]}]
             (if-not active
               ;; `dec` used for tracking the layout regardless of status
@@ -79,17 +78,17 @@
           [(count tf-stack) pos]
           (rseq tf-stack)))
 
-(defn- graph->grid
-  ([tf-stack node] (graph->grid tf-stack node nil))
-  ([tf-stack [layout pos :as node] bypass]
+(defn- to-grid
+  ([tf-stack origin] (to-grid tf-stack origin nil))
+  ([tf-stack [layout pos :as origin] bypass]
    (letfn [(active? [layout]
              (or (zero? layout)
                  (:active (get tf-stack (dec layout)))))
-           (to-active [[layout pos :as node]]
+           (to-active [[layout pos :as origin]]
              (transduce (take-while (complement :active))
                         (completing (fn [[layout pos] {:keys [to-graph]}]
                                       [(dec layout) (to-graph pos bypass)]))
-                        node
+                        origin
                         (rseq (subvec tf-stack 0 layout))))
            (to-grid [[layout pos]]
              (transduce (filter :active)
@@ -98,27 +97,27 @@
                                           (reduced nil))))
                         pos
                         (subvec tf-stack layout)))]
-     (cond (active? layout) (to-grid node)
-           bypass           (-> node to-active to-grid)))))
+     (cond (active? layout) (to-grid origin)
+           bypass           (-> origin to-active to-grid)))))
 
-;;; Conversion between nodes and cells
-(defn- cell->node [cell {:keys [transformations]}]
-  (map grid->graph transformations cell))
+;;; Tracing between origins and (visible) cells
+(defn- cell->origin [cell {:keys [transformations]}]
+  (map to-graph transformations cell))
 
-(defn- node->cell
-  ([node chart]
-   (node->cell node chart nil))
-  ([node {:keys [transformations]} bypass]
-   (reduce (fn [position [node-coordinate tf-stack]]
-             (if-let [pos-coord (graph->grid tf-stack node-coordinate bypass)]
+(defn- origin->cell
+  ([origin chart]
+   (origin->cell origin chart nil))
+  ([origin {:keys [transformations]} bypass]
+   (reduce (fn [position [origin-coordinate tf-stack]]
+             (if-let [pos-coord (to-grid tf-stack origin-coordinate bypass)]
                (conj position pos-coord)
                (reduced nil)))
            []
-           (map vector node transformations))))
+           (map vector origin transformations))))
 
-(defn- slice->cells [{:keys [start end]} chart]
-  (let [start  (node->cell start chart :max)
-        end    (node->cell end chart :min)
+(defn- slice-origins->cells [{:keys [start end]} chart]
+  (let [start  (origin->cell start chart :max)
+        end    (origin->cell end chart :min)
         ranges (->> (map inc end) (map range start))]
     (apply comb/cartesian-product ranges)))
 
@@ -192,19 +191,19 @@
            :decoder         decoder}
     dimension-names (assoc :dimensions dimension-names)))
 
-(defn node-id->cell
-  "Returns the cell for `node-id` according to `chart`, `nil` if not visible."
-  [node-id {:keys [decoder] :as chart}]
-  (-> node-id decoder (node->cell chart)))
+(defn node->cell
+  "Returns the cell for `node` according to `chart`, `nil` if not visible."
+  [node {:keys [decoder] :as chart}]
+  (-> node decoder (origin->cell chart)))
 
-(defn slice-ids->cells
+(defn slice-nodes->cells
   "Returns the `slice`'s cells according to `chart`."
   [{:keys [start end]} {:keys [decoder] :as chart}]
-  (slice->cells {:start (decoder start) :end (decoder end)} chart))
+  (slice-origins->cells {:start (decoder start) :end (decoder end)} chart))
 
-(defn cell->node-id [cell {:keys [encoder] :as chart}]
-  "Returns the node ID for `cell` according to `chart`."
-  (-> cell (cell->node chart) encoder))
+(defn cell->node [cell {:keys [encoder] :as chart}]
+  "Returns the node for `cell` according to `chart`."
+  (-> cell (cell->origin chart) encoder))
 
 (defn- discard-undone
   [{{:keys [operation-pointers last-active]} :trail :as chart}]
