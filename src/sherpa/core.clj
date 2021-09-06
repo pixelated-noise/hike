@@ -2,7 +2,7 @@
   (:require [clojure.spec.alpha :as s]
             [clojure.math.combinatorics :as comb]))
 
-;;; Low-level transformations
+;;; Low-level constructor for position transformation
 (s/def ::nat (s/and integer? (complement neg?)))
 (s/def ::position ::nat)
 
@@ -23,7 +23,7 @@
             :else           (- n count)))))
 
 (defn- cross [{:keys [index count offset]}]
-  (assert (pos? offset))
+  (s/assert ::nat offset)
   ;; `n` passes through if outside the non-inclusive (`min-pass`, `max-pass`)
   ;; interval, `cross-index` marks the start of the complementary cell group.
   (let [min-pass    (dec index)
@@ -50,10 +50,11 @@
 (s/def ::operation (s/multi-spec operation :action))
 
 (defn- normalize-move [{:keys [index count offset] :as op}]
-  (if (pos? offset) op
-      {:index  (+ index offset)
-       :count  (- offset)
-       :offset count}))
+  (if (neg? offset)
+    {:index  (+ index offset)
+     :count  (- offset)
+     :offset count}
+    op))
 
 (s/def ::to-grid fn?)
 (s/def ::to-graph fn?)
@@ -74,6 +75,10 @@
                    :to-grid  (cross op)}))
       (assoc :active true :operation op)))
 
+(s/fdef make-transformation
+  :args (s/cat :operation ::operation)
+  :ret ::transformation)
+
 ;;; Transformation stacks
 (s/def ::transformation-stack (s/coll-of ::transformation))
 (defn- make-transformation-stack [] [])
@@ -88,6 +93,7 @@
 ;; A coordinate along a dimension specifies both the position and layout
 (s/def ::coordinate (s/cat :layout ::nat :position ::nat))
 (s/def ::cell (s/coll-of ::coordinate))
+(s/def ::bypass (s/nilable #{:min :max}))
 
 (defn- to-graph [tf-stack pos]
   (reduce (fn [[layout pos] {:keys [active to-graph]}]
@@ -99,6 +105,11 @@
                 (reduced [layout pos]))))
           [(count tf-stack) pos]
           (rseq tf-stack)))
+
+(s/fdef to-graph
+  :args (s/cat :tf-stack ::transformation-stack
+               :pos ::position)
+  :ret ::cell)
 
 (defn- to-grid
   ([tf-stack origin] (to-grid tf-stack origin nil))
@@ -122,12 +133,23 @@
      (cond (active? layout) (to-grid origin)
            bypass           (-> origin to-active to-grid)))))
 
+(s/fdef to-grid
+  :args (s/cat :tf-stack ::transformation-stack
+               :pos ::position
+               :bypass (s/? ::bypass))
+  :ret (s/nilable ::cell))
+
 ;;; Tracing between origins and (visible) cells
 ;; Storing a transformation stack for each dimension
 (s/def ::transformations (s/coll-of ::transformation-stack))
 
 (defn- cell->origin [cell {:keys [transformations]}]
   (map to-graph transformations cell))
+
+(s/fdef cell->origin
+  :args (s/cat :cell ::cell
+               :transformations (s/keys :req-un [::transformations]))
+  :ret ::cell)
 
 (defn- origin->cell
   ([origin chart]
@@ -139,6 +161,11 @@
                (reduced nil)))
            []
            (map vector origin transformations))))
+
+(s/fdef origin->cell
+  :args (s/cat :cell ::cell
+               :transformations (s/keys :req-un [::transformations]))
+  :ret (s/nilable ::cell))
 
 ;; A slice is defined by its boundaries
 (s/def ::start ::cell)
