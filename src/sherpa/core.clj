@@ -139,53 +139,19 @@
                :bypass (s/? ::bypass))
   :ret (s/nilable ::cell))
 
-;;; Tracing between origins and (visible) cells
-;; Storing a transformation stack for each dimension
-(s/def ::transformations (s/coll-of ::transformation-stack))
-
-(defn- cell->origin [cell {:keys [transformations]}]
-  (map to-graph transformations cell))
-
-(s/fdef cell->origin
-  :args (s/cat :cell ::cell
-               :transformations (s/keys :req-un [::transformations]))
-  :ret ::cell)
-
-(defn- origin->cell
-  ([origin chart]
-   (origin->cell origin chart nil))
-  ([origin {:keys [transformations]} bypass]
-   (reduce (fn [cell-position [coordinate tf-stack]]
-             (if-let [position (to-grid tf-stack coordinate bypass)]
-               (conj cell-position position)
-               (reduced nil)))
-           []
-           (map vector origin transformations))))
-
-(s/fdef origin->cell
-  :args (s/cat :cell ::cell
-               :transformations (s/keys :req-un [::transformations]))
-  :ret (s/nilable ::cell))
-
 ;; A slice is defined by its boundaries
 (s/def ::start ::cell)
 (s/def ::end ::cell)
 (s/def ::slice (s/keys :req-un [::start ::end]))
 
-(defn- slice-origins->cells [{:keys [start end]} chart]
-  (let [start  (origin->cell start chart :max)
-        end    (origin->cell end chart :min)
-        ranges (->> (map inc end) (map range start))]
-    (apply comb/cartesian-product ranges)))
-
-;;; Public API
+;;; Multidimensional chart
+(s/def ::transformations (s/coll-of ::transformation-stack))
 (s/def ::operation-pointer (s/cat :dimension ::nat :index ::nat))
 (s/def ::operation-pointers (s/coll-of ::operation-pointer))
 (s/def ::last-active (s/or :none #{-1} :id ::nat))
 (s/def ::trail (s/keys :req-un [::operation-pointers ::last-active]))
 (s/def ::dimensions (s/coll-of keyword?))
-(s/def ::chart (s/keys :req-un [::transformations ::trail
-                                ::encoder ::decoder]
+(s/def ::chart (s/keys :req-un [::transformations ::trail ::encoder ::decoder]
                        :opt-un [::dimensions]))
 
 (defn make-chart
@@ -206,6 +172,22 @@
            :decoder         decoder}
     dimension-names (assoc :dimensions dimension-names)))
 
+(defn cell->node [cell {:keys [transformations encoder] :as chart}]
+  "Returns the node for `cell` according to `chart`."
+  (let [cell->origin (partial map to-graph transformations)]
+    (-> cell cell->origin encoder)))
+
+(defn- origin->cell
+  ([origin chart]
+   (origin->cell origin chart nil))
+  ([origin {:keys [transformations]} bypass]
+   (reduce (fn [cell-position [coordinate tf-stack]]
+             (if-let [position (to-grid tf-stack coordinate bypass)]
+               (conj cell-position position)
+               (reduced nil)))
+           []
+           (map vector origin transformations))))
+
 (defn node->cell
   "Returns the cell for `node` according to `chart`, `nil` if not visible."
   [node {:keys [decoder] :as chart}]
@@ -214,11 +196,10 @@
 (defn slice-nodes->cells
   "Returns the `slice`'s cells according to `chart`."
   [{:keys [start end]} {:keys [decoder] :as chart}]
-  (slice-origins->cells {:start (decoder start) :end (decoder end)} chart))
-
-(defn cell->node [cell {:keys [encoder] :as chart}]
-  "Returns the node for `cell` according to `chart`."
-  (-> cell (cell->origin chart) encoder))
+  (let [start  (-> start decoder (origin->cell chart :max))
+        end    (-> end decoder (origin->cell chart :min))
+        ranges (->> (map inc end) (map range start))]
+    (apply comb/cartesian-product ranges)))
 
 (defn- discard-undone
   [{{:keys [operation-pointers last-active]} :trail :as chart}]
