@@ -135,42 +135,49 @@
 
 (s/fdef to-grid
   :args (s/cat :tf-stack ::transformation-stack
-               :pos ::position
+               :origin ::cell
                :bypass (s/? ::bypass))
   :ret (s/nilable ::cell))
 
-;; A slice is defined by its boundaries
-(s/def ::start ::cell)
-(s/def ::end ::cell)
-(s/def ::slice (s/keys :req-un [::start ::end]))
-
 ;;; Multidimensional chart
 (s/def ::transformations (s/coll-of ::transformation-stack))
+(s/def ::dimension->index ifn?)
 (s/def ::operation-pointer (s/cat :dimension ::nat :index ::nat))
 (s/def ::operation-pointers (s/coll-of ::operation-pointer))
 (s/def ::last-active (s/or :none #{-1} :id ::nat))
 (s/def ::trail (s/keys :req-un [::operation-pointers ::last-active]))
 (s/def ::dimensions (s/coll-of keyword?))
-(s/def ::chart (s/keys :req-un [::transformations ::trail ::encoder ::decoder]
+(s/def ::chart (s/keys :req-un [::transformations ::dimension->index ::trail
+                                ::encoder ::decoder]
                        :opt-un [::dimensions]))
 
 (defn make-chart
-  "Construct a multi-dimensional chart. If `dimension-names` are supplied,
+  "Constructs a multi-dimensional chart. If `dimension-names` are supplied,
   dimensions are named, otherwise anonymous. Iff anonymous, their number is
   defined by `dimension-count`. The `encoder`/`decoder` functions convert
   nodes to/from identifiers for the graph storage backend (both default to
   `identity`)."
   [{:keys [dimension-names dimension-count encoder decoder]
     :or   {encoder identity decoder identity}}]
-  (cond-> {:transformations (vec (repeat (if (seq dimension-names)
-                                           (count dimension-names)
-                                           dimension-count)
-                                         (make-transformation-stack)))
-           :trail           {:operation-pointers []
-                             :last-active        -1}
-           :encoder         encoder
-           :decoder         decoder}
-    dimension-names (assoc :dimensions dimension-names)))
+  (let [named? (seq dimension-names)]
+    (cond-> {:transformations  (vec (repeat (if named?
+                                              (count dimension-names)
+                                              dimension-count)
+                                            (make-transformation-stack)))
+             :dimension->index (if named?
+                                 (zipmap dimension-names (range))
+                                 identity)
+             :trail            {:operation-pointers []
+                                :last-active        -1}
+             :encoder          encoder
+             :decoder          decoder}
+      named? (assoc :dimensions dimension-names))))
+
+(s/fdef make-chart
+  :args (s/cat :chart-options
+               (s/keys :req-un [(or ::dimension-names ::dimension-count)]
+                       :opt-un [::encoder ::decoder]))
+  :ret ::chart)
 
 (defn cell->node [cell {:keys [transformations encoder] :as chart}]
   "Returns the node for `cell` according to `chart`."
@@ -193,6 +200,11 @@
   [node {:keys [decoder] :as chart}]
   (-> node decoder (origin->cell chart)))
 
+;; A slice is defined by its boundaries
+(s/def ::start ::cell)
+(s/def ::end ::cell)
+(s/def ::slice (s/keys :req-un [::start ::end]))
+
 (defn slice-nodes->cells
   "Returns the `slice`'s cells according to `chart`."
   [{:keys [start end]} {:keys [decoder] :as chart}]
@@ -211,10 +223,8 @@
   "Adds the `operation` on the specified `dimension` to `chart`. For charts with
   named dimensions, `dimension` is a name, otherwise an index. Discards any
   previously undone operations."
-  [{:keys [dimensions transformations] :as chart} dimension operation]
-  (let [index    (if dimensions
-                   (.indexOf dimensions dimension)
-                   dimension)
+  [{:keys [dimension->index transformations] :as chart} dimension operation]
+  (let [index    (dimension->index dimension)
         tf-count (count (nth transformations index))]
     (-> chart
         discard-undone

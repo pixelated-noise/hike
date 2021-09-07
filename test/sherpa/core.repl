@@ -314,10 +314,6 @@
       (operate :col {:action :move :index 8 :count 10 :offset -3})
       (operate :col {:action :remove :index 4 :count 3})))
 
-;; (defn show-node [id]
-;;   (let [{:keys [sheet row-layout row-pos col-layout col-pos]} (decode id)]
-;;     [sheet [row-layout row-pos] [col-layout col-pos]]))
-
 (defn cell-range [[fr fc] [tr tc]]
   (set (comb/cartesian-product (range fr (inc tr)) (range fc (inc tc)))))
 
