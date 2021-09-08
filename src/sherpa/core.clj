@@ -92,7 +92,6 @@
 (s/def ::cell-position (s/coll-of ::position))
 ;; A coordinate along a dimension specifies both the position and layout
 (s/def ::coordinate (s/cat :layout ::nat :position ::nat))
-(s/def ::cell (s/coll-of ::coordinate))
 (s/def ::bypass (s/nilable #{:min :max}))
 
 (defn- to-graph [tf-stack pos]
@@ -109,7 +108,7 @@
 (s/fdef to-graph
   :args (s/cat :tf-stack ::transformation-stack
                :pos ::position)
-  :ret ::cell)
+  :ret ::coordinate)
 
 (defn- to-grid
   ([tf-stack origin] (to-grid tf-stack origin nil))
@@ -135,9 +134,9 @@
 
 (s/fdef to-grid
   :args (s/cat :tf-stack ::transformation-stack
-               :origin ::cell
+               :origin ::coordinate
                :bypass (s/? ::bypass))
-  :ret (s/nilable ::cell))
+  :ret (s/nilable ::position))
 
 ;;; Multidimensional chart
 (s/def ::transformations (s/coll-of ::transformation-stack))
@@ -178,6 +177,9 @@
                (s/keys :req-un [(or ::dimension-names ::dimension-count)]
                        :opt-un [::encoder ::decoder]))
   :ret ::chart)
+
+;;; A cell is specified by its coordinates
+(s/def ::cell (s/coll-of ::coordinate))
 
 (defn cell->node [cell {:keys [transformations encoder] :as chart}]
   "Returns the node for `cell` according to `chart`."
