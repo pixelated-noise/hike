@@ -6,6 +6,20 @@
 (s/def ::nat (s/and integer? (complement neg?)))
 (s/def ::position ::nat)
 
+(s/def ::action #{:insert :remove :move})
+(s/def ::index ::nat)
+(s/def ::count ::nat)
+(s/def ::offset integer?)
+
+(defmulti ^:private operation :action)
+(defmethod operation :insert [_]
+  (s/keys :req-un [::action ::index ::count]))
+(defmethod operation :remove [_]
+  (s/keys :req-un [::action ::index ::count]))
+(defmethod operation :move [_]
+  (s/keys :req-un [::action ::index ::count ::offset]))
+(s/def ::operation (s/multi-spec operation :action))
+
 (defn- split [{:keys [index count]}]
   (fn [n & _] (if (< n index) n (+ n count))))
 
@@ -35,20 +49,6 @@
             :else                                (- n count)))))
 
 ;;; Bidirectional transformations
-(s/def ::action #{:insert :remove :move})
-(s/def ::index ::nat)
-(s/def ::count ::nat)
-(s/def ::offset integer?)
-
-(defmulti ^:private operation :action)
-(defmethod operation :insert [_]
-  (s/keys :req-un [::action ::index ::count]))
-(defmethod operation :remove [_]
-  (s/keys :req-un [::action ::index ::count]))
-(defmethod operation :move [_]
-  (s/keys :req-un [::action ::index ::count ::offset]))
-(s/def ::operation (s/multi-spec operation :action))
-
 (defn- normalize-move [{:keys [index count offset] :as op}]
   (if (neg? offset)
     {:index  (+ index offset)
