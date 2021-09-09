@@ -88,10 +88,8 @@
 
 ;;; Threading through the stack
 (s/def ::layout ::nat)
-;; A cell's position is the collection of positions along each dimension
-(s/def ::cell-position (s/coll-of ::position))
 ;; A coordinate along a dimension specifies both the position and layout
-(s/def ::coordinate (s/cat :layout ::nat :position ::nat))
+(s/def ::coordinate (s/tuple ::nat ::nat))
 (s/def ::bypass (s/nilable #{:min :max}))
 
 (defn- to-graph [tf-stack pos]
@@ -141,7 +139,7 @@
 ;;; Multidimensional chart
 (s/def ::transformations (s/coll-of ::transformation-stack))
 (s/def ::dimension->index ifn?)
-(s/def ::operation-pointer (s/cat :dimension ::nat :index ::nat))
+(s/def ::operation-pointer (s/tuple ::nat ::nat))
 (s/def ::operation-pointers (s/coll-of ::operation-pointer))
 (s/def ::last-active (s/or :none #{-1} :id ::nat))
 (s/def ::trail (s/keys :req-un [::operation-pointers ::last-active]))
@@ -180,6 +178,7 @@
 
 ;;; A cell is specified by its coordinates
 (s/def ::cell (s/coll-of ::coordinate))
+(s/def ::cell-position (s/coll-of ::position))
 
 (defn cell->node [cell {:keys [transformations encoder] :as chart}]
   "Returns the node for `cell` according to `chart`."

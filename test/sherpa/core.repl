@@ -126,7 +126,7 @@
 (check! (fn [_] (round-trip-ok? test-tf-stack (range 1 21))))
 
 
-;;; Grid<to-graph transformation scenarios
+;;; Grid<->graph transformation scenarios
 (def test-tf-stack
   (-> (make-transformation-stack)
       (push {:action :insert
