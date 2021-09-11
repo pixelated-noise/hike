@@ -63,17 +63,23 @@
   (s/keys :req-un [::to-grid ::to-graph ::active]
           :opt-un [::operation]))
 
-(defn- make-transformation [{:keys [action] :as op}]
-  (-> (condp = action
-        :insert {:to-graph (dead-end op) :to-grid (split op)}
-        :remove {:to-graph (split op) :to-grid (dead-end op)}
-        ;; normalize the `move` (ensuring a positive `offset`) to enable
-        ;; swapping of `count` with `offset` for the `to-graph` transformation
-        :move   (let [{:keys [count offset] :as op} (normalize-move op)]
-                  {:to-graph (cross (merge op {:count  offset
-                                               :offset count}))
-                   :to-grid  (cross op)}))
-      (assoc :active true :operation op)))
+(defmulti transformers :action)
+
+(defmethod transformers :insert [op]
+  {:to-graph (dead-end op) :to-grid (split op)})
+
+(defmethod transformers :remove [op]
+  {:to-graph (split op) :to-grid (dead-end op)})
+
+(defmethod transformers :move [op]
+  ;; normalize the `move` (ensuring a positive `offset`) to enable swapping of
+  ;; `count` with `offset` for the `to-graph` transformation
+  (let [{:keys [count offset] :as op} (normalize-move op)]
+    {:to-graph (cross (merge op {:count offset :offset count}))
+     :to-grid  (cross op)}))
+
+(defn- make-transformation [op]
+  (-> op transformers (assoc :active true :operation op)))
 
 (s/fdef make-transformation
   :args (s/cat :operation ::operation)
