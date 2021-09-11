@@ -308,7 +308,7 @@
 
 ;;; Nodes, cells and slices
 (def test-chart
-  (-> (make-chart {:dimension-names [:row :col]})
+  (-> (make-chart {:dimensions [:row :col]})
       (operate :row {:action :insert :index 2 :count 10})
       (operate :row {:action :remove :index 4 :count 3})
       (operate :col {:action :move :index 8 :count 10 :offset -3})
@@ -384,7 +384,7 @@
    :last (:last-active trail)})
 
 (def test-chart
-  (-> (make-chart {:dimension-names [:row :col]})
+  (-> (make-chart {:dimensions [:row :col]})
       (operate :col {:action :insert :index 2 :count 3})
       (operate :row {:action :move :index 3 :count 4 :offset 5})
       (operate :col {:action :remove :index 9 :count 2})

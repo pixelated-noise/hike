@@ -2,15 +2,14 @@
   (:require [clojure.spec.alpha :as s]
             [clojure.math.combinatorics :as comb]))
 
-;;; Low-level constructor for position transformation
+;;; Low-level constructors for position transformations
 (s/def ::nat (s/and integer? (complement neg?)))
 (s/def ::position ::nat)
 
-(s/def ::action #{:insert :remove :move})
+(s/def ::action keyword?)
 (s/def ::index ::nat)
 (s/def ::count ::nat)
 (s/def ::offset integer?)
-
 (defmulti ^:private operation :action)
 (defmethod operation :insert [_]
   (s/keys :req-un [::action ::index ::count]))
@@ -22,6 +21,8 @@
 
 (defn- split [{:keys [index count]}]
   (fn [n & _] (if (< n index) n (+ n count))))
+
+(s/def ::bypass (s/nilable #{:min :max}))
 
 (defn- dead-end [{:keys [index count]}]
   ;; `n` passes if outside the non-inclusive (`min-pass`, `max-pass`)
@@ -37,7 +38,6 @@
             :else           (- n count)))))
 
 (defn- cross [{:keys [index count offset]}]
-  (s/assert ::nat offset)
   ;; `n` passes through if outside the non-inclusive (`min-pass`, `max-pass`)
   ;; interval, `cross-index` marks the start of the complementary cell group.
   (let [min-pass    (dec index)
@@ -86,11 +86,9 @@
 (defn- disable [tf-stack tf-id] (assoc-in tf-stack [tf-id :active] false))
 (defn- enable [tf-stack tf-id] (assoc-in tf-stack [tf-id :active] true))
 
-;;; Threading through the stack
+;;; Threading through transformation stacks
 (s/def ::layout ::nat)
-;; A coordinate along a dimension specifies both the position and layout
 (s/def ::coordinate (s/tuple ::nat ::nat))
-(s/def ::bypass (s/nilable #{:min :max}))
 
 (defn- to-graph [tf-stack pos]
   (reduce (fn [[layout pos] {:keys [active to-graph]}]
@@ -143,40 +141,38 @@
 (s/def ::operation-pointers (s/coll-of ::operation-pointer))
 (s/def ::last-active (s/or :none #{-1} :id ::nat))
 (s/def ::trail (s/keys :req-un [::operation-pointers ::last-active]))
-(s/def ::dimensions (s/coll-of keyword?))
+(s/def ::dimensions (s/and (s/coll-of keyword?) (partial apply distinct?)))
+(s/def ::dimensionality nat-int?)
+(s/def ::encoder ifn?)
+(s/def ::decoder ifn?)
 (s/def ::chart (s/keys :req-un [::transformations ::dimension->index ::trail
                                 ::encoder ::decoder]
                        :opt-un [::dimensions]))
 
 (defn make-chart
-  "Constructs a multi-dimensional chart. If `dimension-names` are supplied,
-  dimensions are named, otherwise anonymous. Iff anonymous, their number is
-  defined by `dimension-count`. The `encoder`/`decoder` functions convert
-  nodes to/from identifiers for the graph storage backend (both default to
-  `identity`)."
-  [{:keys [dimension-names dimension-count encoder decoder]
+  "Constructs a multi-dimensional chart. If `dimensions` are supplied,
+  dimensions are named after them, otherwise anonymous. Iff anonymous, their
+  number is defined by `dimensionality`. The `encoder`/`decoder` functions
+  convert nodes to/from identifiers for the graph storage backend (both
+  default to `identity`)."
+  [{:keys [dimensions dimensionality encoder decoder]
     :or   {encoder identity decoder identity}}]
-  (let [named? (seq dimension-names)]
-    (cond-> {:transformations  (vec (repeat (if named?
-                                              (count dimension-names)
-                                              dimension-count)
+  (let [named? (seq dimensions)]
+    (cond-> {:transformations  (vec (repeat (if named? (count dimensions)
+                                                dimensionality)
                                             (make-transformation-stack)))
-             :dimension->index (if named?
-                                 (zipmap dimension-names (range))
-                                 identity)
-             :trail            {:operation-pointers []
-                                :last-active        -1}
+             :dimension->index (if named? (zipmap dimensions (range)) identity)
+             :trail            {:operation-pointers [] :last-active -1}
              :encoder          encoder
              :decoder          decoder}
-      named? (assoc :dimensions dimension-names))))
+      named? (assoc :dimensions dimensions))))
 
 (s/fdef make-chart
   :args (s/cat :chart-options
-               (s/keys :req-un [(or ::dimension-names ::dimension-count)]
+               (s/keys :req-un [(or ::dimensions ::dimension-count)]
                        :opt-un [::encoder ::decoder]))
   :ret ::chart)
 
-;;; A cell is specified by its coordinates
 (s/def ::cell (s/coll-of ::coordinate))
 (s/def ::cell-position (s/coll-of ::position))
 
@@ -201,7 +197,6 @@
   [node {:keys [decoder] :as chart}]
   (-> node decoder (origin->cell chart)))
 
-;; A slice is defined by its boundaries
 (s/def ::start ::cell)
 (s/def ::end ::cell)
 (s/def ::slice (s/keys :req-un [::start ::end]))
@@ -214,6 +209,7 @@
         ranges (->> (map inc end) (map range start))]
     (apply comb/cartesian-product ranges)))
 
+;;; Operations and undo/redo bookkeeping
 (defn- discard-undone
   [{{:keys [operation-pointers last-active]} :trail :as chart}]
   (assoc-in chart
@@ -221,9 +217,9 @@
             (subvec operation-pointers 0 (inc last-active))))
 
 (defn operate
-  "Adds the `operation` on the specified `dimension` to `chart`. For charts with
-  named dimensions, `dimension` is a name, otherwise an index. Discards any
-  previously undone operations."
+  "Perform the `operation` on the specified `dimension` in `chart`. For charts
+  with named dimensions, `dimension` is a name, otherwise an index. Discards
+  any previously undone operations."
   [{:keys [dimension->index transformations] :as chart} dimension operation]
   (let [index    (dimension->index dimension)
         tf-count (count (nth transformations index))]
