@@ -95,7 +95,7 @@
 
 ;;; Threading through transformation stacks
 (s/def ::layout ::nat)
-(s/def ::coordinate (s/tuple ::nat ::nat))
+(s/def ::coordinate (s/tuple ::layout ::position))
 
 (defn- to-graph [tf-stack pos]
   (reduce (fn [[layout pos] {:keys [active to-graph]}]
@@ -109,8 +109,7 @@
           (rseq tf-stack)))
 
 (s/fdef to-graph
-  :args (s/cat :tf-stack ::transformation-stack
-               :pos ::position)
+  :args (s/cat :tf-stack ::transformation-stack :pos ::position)
   :ret ::coordinate)
 
 (defn- to-grid
@@ -125,15 +124,15 @@
                                       [(dec layout) (to-graph pos bypass)]))
                         origin
                         (rseq (subvec tf-stack 0 layout))))
-           (to-grid [[layout pos]]
+           (to-visible [[layout pos]]
              (transduce (filter :active)
                         (completing (fn [pos {:keys [active to-grid]}]
                                       (or (to-grid pos bypass)
                                           (reduced nil))))
                         pos
                         (subvec tf-stack layout)))]
-     (cond (active? layout) (to-grid origin)
-           bypass           (-> origin to-active to-grid)))))
+     (cond (active? layout) (to-visible origin)
+           bypass           (-> origin to-active to-visible)))))
 
 (s/fdef to-grid
   :args (s/cat :tf-stack ::transformation-stack
@@ -144,7 +143,9 @@
 ;;; Multidimensional chart
 (s/def ::transformations (s/coll-of ::transformation-stack))
 (s/def ::dimension->index ifn?)
-(s/def ::operation-pointer (s/tuple ::nat ::nat))
+(s/def ::dimension-index ::nat)
+(s/def ::transformation-index ::nat)
+(s/def ::operation-pointer (s/tuple ::dimension-index ::transformation-index))
 (s/def ::operation-pointers (s/coll-of ::operation-pointer))
 (s/def ::last-active (s/or :none #{-1} :id ::nat))
 (s/def ::trail (s/keys :req-un [::operation-pointers ::last-active]))
