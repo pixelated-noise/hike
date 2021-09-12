@@ -2,7 +2,7 @@
   (:require [clojure.spec.alpha :as s]
             [clojure.math.combinatorics :as comb]))
 
-;;; Low-level constructors for position transformations
+;;; Unidirectional transformers
 (s/def ::nat (s/and integer? (complement neg?)))
 (s/def ::position ::nat)
 
@@ -20,66 +20,67 @@
 (s/def ::operation (s/multi-spec operation :action))
 
 (defn- split [{:keys [index count]}]
-  (fn [n & _] (if (< n index) n (+ n count))))
+  (fn [pos & _] (if (< pos index) pos (+ pos count))))
 
 (s/def ::bypass (s/nilable #{:min :max}))
 
 (defn- dead-end [{:keys [index count]}]
-  ;; `n` passes if outside the non-inclusive (`min-pass`, `max-pass`)
-  ;; interval, otherwise `nil` is normally returned.
+  ;; `pos` passes if outside the non-inclusive (`min-pass`, `max-pass`)
+  ;; interval, otherwise returns `nil`.
   (let [min-pass (dec index)
         max-pass (+ index count)]
     ;; overcome the dead-end by following the specified `bypass` direction
-    (fn [n & [bypass]]
-      (cond (<= n min-pass) n
-            (< n max-pass)  (get {:min min-pass
-                                  :max index}
-                                 bypass)
-            :else           (- n count)))))
+    (fn [pos & [bypass]]
+      (cond (<= pos min-pass) pos
+            (< pos max-pass)  (get {:min min-pass
+                                    :max index}
+                                   bypass)
+            :else             (- pos count)))))
 
 (defn- cross [{:keys [index count offset]}]
-  ;; `n` passes through if outside the non-inclusive (`min-pass`, `max-pass`)
+  (s/assert ::nat offset)
+  ;; `pos` passes if outside the non-inclusive (`min-pass`, `max-pass`)
   ;; interval, `cross-index` marks the start of the complementary cell group.
   (let [min-pass    (dec index)
         cross-index (+ index count)
         max-pass    (+ cross-index offset)]
-    (fn [n & _]
-      (cond (or (<= n min-pass) (<= max-pass n)) n
-            (<= index n (dec cross-index))       (+ n offset)
-            :else                                (- n count)))))
+    (fn [pos & _]
+      (cond (or (<= pos min-pass) (<= max-pass pos)) pos
+            (<= index pos (dec cross-index))         (+ pos offset)
+            :else                                    (- pos count)))))
 
 ;;; Bidirectional transformations
-(defn- normalize-move [{:keys [index count offset] :as op}]
-  (if (neg? offset)
-    {:index  (+ index offset)
-     :count  (- offset)
-     :offset count}
-    op))
-
 (s/def ::to-grid fn?)
 (s/def ::to-graph fn?)
+(s/def ::transformers (s/keys :req-un [::to-grid ::to-graph]))
 (s/def ::active boolean?)
 (s/def ::transformation
-  (s/keys :req-un [::to-grid ::to-graph ::active]
-          :opt-un [::operation]))
+  (s/merge ::transformers (s/keys :req-un [::active] :opt-un [::operation])))
 
-(defmulti transformers :action)
+(defmulti make-transformers :action)
 
-(defmethod transformers :insert [op]
+(s/fdef make-transformers
+  :args (s/cat :operation ::operation)
+  :ret ::transformers)
+
+(defmethod make-transformers :insert [op]
   {:to-graph (dead-end op) :to-grid (split op)})
 
-(defmethod transformers :remove [op]
+(defmethod make-transformers :remove [op]
   {:to-graph (split op) :to-grid (dead-end op)})
 
-(defmethod transformers :move [op]
+(defmethod make-transformers :move [{:keys [index count offset] :as op}]
   ;; normalize the `move` (ensuring a positive `offset`) to enable swapping of
   ;; `count` with `offset` for the `to-graph` transformation
-  (let [{:keys [count offset] :as op} (normalize-move op)]
+  (let [{:keys [count offset] :as op} (if-not (neg? offset) op
+                                              {:index  (+ index offset)
+                                               :count  (- offset)
+                                               :offset count})]
     {:to-graph (cross (merge op {:count offset :offset count}))
      :to-grid  (cross op)}))
 
 (defn- make-transformation [op]
-  (-> op transformers (assoc :active true :operation op)))
+  (-> op make-transformers (assoc :active true :operation op)))
 
 (s/fdef make-transformation
   :args (s/cat :operation ::operation)
