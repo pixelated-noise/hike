@@ -113,16 +113,16 @@
   :ret ::coordinate)
 
 (defn- to-grid
-  ([tf-stack origin] (to-grid tf-stack origin nil))
-  ([tf-stack [layout pos :as origin] bypass]
+  ([tf-stack coordinate] (to-grid tf-stack coordinate nil))
+  ([tf-stack [layout pos :as coordinate] bypass]
    (letfn [(active? [layout]
              (or (zero? layout)
                  (:active (get tf-stack (dec layout)))))
-           (to-active [[layout pos :as origin]]
+           (to-active [[layout pos :as coordinate]]
              (transduce (take-while (complement :active))
                         (completing (fn [[layout pos] {:keys [to-graph]}]
                                       [(dec layout) (to-graph pos bypass)]))
-                        origin
+                        coordinate
                         (rseq (subvec tf-stack 0 layout))))
            (to-visible [[layout pos]]
              (transduce (filter :active)
@@ -131,12 +131,12 @@
                                           (reduced nil))))
                         pos
                         (subvec tf-stack layout)))]
-     (cond (active? layout) (to-visible origin)
-           bypass           (-> origin to-active to-visible)))))
+     (cond (active? layout) (to-visible coordinate)
+           bypass           (-> coordinate to-active to-visible)))))
 
 (s/fdef to-grid
   :args (s/cat :tf-stack ::transformation-stack
-               :origin ::coordinate
+               :coordinate ::coordinate
                :bypass (s/? ::bypass))
   :ret (s/nilable ::position))
 
@@ -160,8 +160,8 @@
   "Constructs a multi-dimensional chart. If `dimensions` are supplied,
   dimensions are named after them, otherwise anonymous. Iff anonymous, their
   number is defined by `dimensionality`. The `encode`/`decode` functions
-  convert origin coordinates to/from node IDs for the graph storage
-  backend (both default to `identity`)."
+  convert cell origins to/from node IDs for the graph storage backend (both
+  default to `identity`)."
   [{:keys [dimensions dimensionality encode decode]
     :or   {encode identity decode identity}}]
   (let [named? (seq dimensions)]
@@ -180,8 +180,8 @@
                        :opt-un [::encode ::decode]))
   :ret ::chart)
 
-(s/def ::cell (s/coll-of ::coordinate))
-(s/def ::cell-position (s/coll-of ::position))
+(s/def ::origin (s/coll-of ::coordinate))
+(s/def ::cell (s/coll-of ::position))
 
 (defn cell->node
   "Returns the node for `cell` according to `chart`."
@@ -205,8 +205,8 @@
   [node {:keys [decode] :as chart}]
   (-> node decode (origin->cell chart)))
 
-(s/def ::start ::cell)
-(s/def ::end ::cell)
+(s/def ::start ::origin)
+(s/def ::end ::origin)
 (s/def ::slice (s/keys :req-un [::start ::end]))
 
 (defn slice-nodes->cells
