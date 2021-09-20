@@ -325,19 +325,19 @@
 (node->cell [[0 5] [0 5]]
             (-> test-chart
                 ;; disable removals
-                (update-in [:transformations 0] disable 1)
-                (update-in [:transformations 1] disable 1)))
+                (update-in [:tf-stacks 0] disable 1)
+                (update-in [:tf-stacks 1] disable 1)))
 (check! #{[15 15]})
 
 ;;; The node vanishes if we disable the row insertion, the col move, or both
 ;;; (its cell is subsequently removed -- this is a case of non-hierarchical
 ;;; disable)
 (map (partial node->cell [[0 5] [0 5]])
-     [(update-in test-chart [:transformations 0] disable 0)
-      (update-in test-chart [:transformations 1] disable 0)
+     [(update-in test-chart [:tf-stacks 0] disable 0)
+      (update-in test-chart [:tf-stacks 1] disable 0)
       (-> test-chart
-          (update-in [:transformations 0] disable 0)
-          (update-in [:transformations 1] disable 0))])
+          (update-in [:tf-stacks 0] disable 0)
+          (update-in [:tf-stacks 1] disable 0))])
 (check! #(every? nil? %))
 
 
@@ -347,8 +347,8 @@
 
 (map #(cell->node % (-> test-chart
                         ;; disable removals
-                        (update-in [:transformations 0] disable 1)
-                        (update-in [:transformations 1] disable 1)))
+                        (update-in [:tf-stacks 0] disable 1)
+                        (update-in [:tf-stacks 1] disable 1)))
      [[1 1] [15 15]])
 (check! #{[[[0 1] [0 1]] [[0 5] [0 5]]]})
 
@@ -363,24 +363,24 @@
                      :end   [[0 2] [0 5]]}
                     (-> test-chart
                         ;; disable removals
-                        (update-in [:transformations 0] disable 1)
-                        (update-in [:transformations 1] disable 1)))
+                        (update-in [:tf-stacks 0] disable 1)
+                        (update-in [:tf-stacks 1] disable 1)))
 (check! #(= (cell-range [1 1] [12 15]) (set %)))
 
 (slice-nodes->cells {:start [[0 1] [0 1]]
                      :end   [[0 2] [0 5]]}
                     (-> test-chart
                         ;; disable insertion
-                        (update-in [:transformations 0] disable 0)
+                        (update-in [:tf-stacks 0] disable 0)
                         ;; disable move (essentially insertion to slice)
-                        (update-in [:transformations 1] disable 0)))
+                        (update-in [:tf-stacks 1] disable 0)))
 (check! #(= (cell-range [1 1] [2 3]) (set %)))
 
 
 ;;; High-level interface and undo/redo
-(defn show-statuses [{:keys [transformations trail]}]
-  {:row (mapv :active (nth transformations 0))
-   :col (mapv :active (nth transformations 1))
+(defn show-statuses [{:keys [tf-stacks trail]}]
+  {:row (mapv :active (nth tf-stacks 0))
+   :col (mapv :active (nth tf-stacks 1))
    :last (:last-active trail)})
 
 (def test-chart
@@ -421,5 +421,5 @@
     redo redo redo redo redo redo
     ((juxt show-statuses :trail)))
 (check! #{[{:row [true false true] :col [true true true] :last 4}
-           {:operation-pointers [[1 0] [0 0] [1 1] [1 2] [0 2]]
-            :last-active        4}]})
+           {:op-pointers [[1 0] [0 0] [1 1] [1 2] [0 2]]
+            :last-active 4}]})

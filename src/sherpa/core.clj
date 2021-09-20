@@ -141,69 +141,69 @@
   :ret (s/nilable ::position))
 
 ;;; Multidimensional chart
-(s/def ::transformations (s/coll-of ::transformation-stack))
-(s/def ::dimension->index ifn?)
-(s/def ::dimension-index ::nat)
-(s/def ::transformation-index ::nat)
-(s/def ::operation-pointer (s/tuple ::dimension-index ::transformation-index))
-(s/def ::operation-pointers (s/coll-of ::operation-pointer))
-(s/def ::last-active (s/or :none #{-1} :id ::nat))
-(s/def ::trail (s/keys :req-un [::operation-pointers ::last-active]))
 (s/def ::dimensions (s/and (s/coll-of keyword?) (partial apply distinct?)))
 (s/def ::dimensionality nat-int?)
-(s/def ::encoder ifn?)
-(s/def ::decoder ifn?)
-(s/def ::chart (s/keys :req-un [::transformations ::dimension->index ::trail
-                                ::encoder ::decoder]
+(s/def ::tf-stacks (s/coll-of ::transformation-stack))
+(s/def ::dim->index ifn?)
+(s/def ::dim-index ::nat)
+(s/def ::tf-index ::nat)
+(s/def ::op-pointers (s/coll-of (s/tuple ::dim-index ::tf-index)))
+(s/def ::last-active (s/or :none #{-1} :id ::nat))
+(s/def ::trail (s/keys :req-un [::op-pointers ::last-active]))
+(s/def ::encode ifn?)
+(s/def ::decode ifn?)
+(s/def ::chart (s/keys :req-un [::tf-stacks ::dim->index ::trail
+                                ::encode ::decode]
                        :opt-un [::dimensions]))
 
 (defn make-chart
   "Constructs a multi-dimensional chart. If `dimensions` are supplied,
   dimensions are named after them, otherwise anonymous. Iff anonymous, their
-  number is defined by `dimensionality`. The `encoder`/`decoder` functions
-  convert nodes to/from identifiers for the graph storage backend (both
-  default to `identity`)."
-  [{:keys [dimensions dimensionality encoder decoder]
-    :or   {encoder identity decoder identity}}]
+  number is defined by `dimensionality`. The `encode`/`decode` functions
+  convert origin coordinates to/from node IDs for the graph storage
+  backend (both default to `identity`)."
+  [{:keys [dimensions dimensionality encode decode]
+    :or   {encode identity decode identity}}]
   (let [named? (seq dimensions)]
-    (cond-> {:transformations  (vec (repeat (if named? (count dimensions)
-                                                dimensionality)
-                                            (make-transformation-stack)))
-             :dimension->index (if named? (zipmap dimensions (range)) identity)
-             :trail            {:operation-pointers [] :last-active -1}
-             :encoder          encoder
-             :decoder          decoder}
+    (cond-> {:tf-stacks  (vec (repeat (if named? (count dimensions)
+                                          dimensionality)
+                                      (make-transformation-stack)))
+             :dim->index (if named? (zipmap dimensions (range)) identity)
+             :trail      {:op-pointers [] :last-active -1}
+             :encode     encode
+             :decode     decode}
       named? (assoc :dimensions dimensions))))
 
 (s/fdef make-chart
   :args (s/cat :chart-options
-               (s/keys :req-un [(or ::dimensions ::dimension-count)]
-                       :opt-un [::encoder ::decoder]))
+               (s/keys :req-un [(or ::dimensions ::dimensionality)]
+                       :opt-un [::encode ::decode]))
   :ret ::chart)
 
 (s/def ::cell (s/coll-of ::coordinate))
 (s/def ::cell-position (s/coll-of ::position))
 
-(defn cell->node [cell {:keys [transformations encoder] :as chart}]
+(defn cell->node
   "Returns the node for `cell` according to `chart`."
-  (let [cell->origin (partial map to-graph transformations)]
-    (-> cell cell->origin encoder)))
+  [cell {:keys [tf-stacks encode] :as chart}]
+  (let [cell->origin (partial map to-graph tf-stacks)]
+    (-> cell cell->origin encode)))
 
 (defn- origin->cell
   ([origin chart]
    (origin->cell origin chart nil))
-  ([origin {:keys [transformations]} bypass]
+  ([origin {:keys [tf-stacks]} bypass]
    (reduce (fn [cell-position [coordinate tf-stack]]
              (if-let [position (to-grid tf-stack coordinate bypass)]
                (conj cell-position position)
                (reduced nil)))
            []
-           (map vector origin transformations))))
+           (map vector origin tf-stacks))))
 
 (defn node->cell
   "Returns the cell for `node` according to `chart`, `nil` if not visible."
-  [node {:keys [decoder] :as chart}]
-  (-> node decoder (origin->cell chart)))
+  [node {:keys [decode] :as chart}]
+  (-> node decode (origin->cell chart)))
 
 (s/def ::start ::cell)
 (s/def ::end ::cell)
@@ -211,48 +211,48 @@
 
 (defn slice-nodes->cells
   "Returns the `slice`'s cells according to `chart`."
-  [{:keys [start end]} {:keys [decoder] :as chart}]
-  (let [start  (-> start decoder (origin->cell chart :max))
-        end    (-> end decoder (origin->cell chart :min))
+  [{:keys [start end]} {:keys [decode] :as chart}]
+  (let [start  (-> start decode (origin->cell chart :max))
+        end    (-> end decode (origin->cell chart :min))
         ranges (->> (map inc end) (map range start))]
     (apply comb/cartesian-product ranges)))
 
 ;;; Operations and undo/redo bookkeeping
 (defn- discard-undone
-  [{{:keys [operation-pointers last-active]} :trail :as chart}]
+  [{{:keys [op-pointers last-active]} :trail :as chart}]
   (assoc-in chart
-            [:trail :operation-pointers]
-            (subvec operation-pointers 0 (inc last-active))))
+            [:trail :op-pointers]
+            (subvec op-pointers 0 (inc last-active))))
 
 (defn operate
   "Perform the `operation` on the specified `dimension` in `chart`. For charts
   with named dimensions, `dimension` is a name, otherwise an index. Discards
   any previously undone operations."
-  [{:keys [dimension->index transformations] :as chart} dimension operation]
-  (let [index    (dimension->index dimension)
-        tf-count (count (nth transformations index))]
+  [{:keys [dim->index tf-stacks] :as chart} dimension operation]
+  (let [index    (dim->index dimension)
+        tf-count (count (nth tf-stacks index))]
     (-> chart
         discard-undone
-        (update-in [:transformations index] push operation)
-        (update-in [:trail :operation-pointers] conj [index tf-count])
+        (update-in [:tf-stacks index] push operation)
+        (update-in [:trail :op-pointers] conj [index tf-count])
         (update-in [:trail :last-active] inc))))
 
 (defn undo
   "Deactivates the last active operation in `chart`, if any."
-  [{{:keys [operation-pointers last-active]} :trail :as chart}]
+  [{{:keys [op-pointers last-active]} :trail :as chart}]
   ;; check that there is some operation to undo
   (if (neg? last-active) chart
-      (let [[dim-id tf-id] (get operation-pointers last-active)]
+      (let [[dim-id tf-id] (get op-pointers last-active)]
         (-> chart
-            (update-in [:transformations dim-id] disable tf-id)
+            (update-in [:tf-stacks dim-id] disable tf-id)
             (update-in [:trail :last-active] dec)))))
 
 (defn redo
   "Reactivates the last deactivated operation in `chart`, if any."
-  [{{:keys [last-active operation-pointers]} :trail :as chart}]
+  [{{:keys [last-active op-pointers]} :trail :as chart}]
   ;; get the operation *after* `last-active`
-  (if-let [[dim-id tf-id] (get operation-pointers (inc last-active))]
+  (if-let [[dim-id tf-id] (get op-pointers (inc last-active))]
     (-> chart
-        (update-in [:transformations dim-id] enable tf-id)
+        (update-in [:tf-stacks dim-id] enable tf-id)
         (update-in [:trail :last-active] inc))
     chart))
