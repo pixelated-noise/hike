@@ -180,8 +180,8 @@
                        :opt-un [::encode ::decode]))
   :ret ::chart)
 
-(s/def ::origin (s/coll-of ::coordinate))
 (s/def ::cell (s/coll-of ::position))
+(s/def ::origin (s/coll-of ::coordinate))
 
 (defn cell->node
   "Returns the node for `cell` according to `chart`."
@@ -205,8 +205,9 @@
   [node {:keys [decode] :as chart}]
   (-> node decode (origin->cell chart)))
 
-(s/def ::start ::origin)
-(s/def ::end ::origin)
+(s/def ::node-id any?)
+(s/def ::start ::node-id)
+(s/def ::end ::node-id)
 (s/def ::slice (s/keys :req-un [::start ::end]))
 
 (defn slice-nodes->cells
@@ -225,9 +226,9 @@
             (subvec op-pointers 0 (inc last-active))))
 
 (defn operate
-  "Perform the `operation` on the specified `dimension` in `chart`. For charts
-  with named dimensions, `dimension` is a name, otherwise an index. Discards
-  any previously undone operations."
+  "Performs `operation` on the `dimension` in `chart`. For charts with named
+  dimensions, `dimension` is a name, otherwise an index. Discards any
+  previously undone operations."
   [{:keys [dim->index tf-stacks] :as chart} dimension operation]
   (let [index    (dim->index dimension)
         tf-count (count (nth tf-stacks index))]
