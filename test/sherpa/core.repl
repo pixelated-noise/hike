@@ -60,7 +60,7 @@
 ;;; Moving cells around is equivalent to a transposition of two groups of
 ;;; cells for both directions. We will move the cells 7-9 5 positions to the
 ;;; left.
-(map (-> {:action :move :index 7 :count 3 :offset -5}
+(map (-> {:action :transpose :index 7 :count 3 :offset -5}
          make-transformation
          :to-graph)
      (range 1 11))
@@ -68,7 +68,7 @@
 ;;; Original positions of the first 10 cells as found in the new grid
 (check! #{[1 7 8 9 2 3 4 5 6 10]})
 
-(map (-> {:action :move :index 7 :count 3 :offset -5}
+(map (-> {:action :transpose :index 7 :count 3 :offset -5}
          make-transformation
          :to-grid)
      (range 1 11))
@@ -78,7 +78,7 @@
 
 ;;; Same tests for the equivalent operation of moving cells 2-6 3 positions to
 ;;; the right
-(map (-> {:action :move :index 2 :count 5 :offset 3}
+(map (-> {:action :transpose :index 2 :count 5 :offset 3}
          make-transformation
          :to-graph)
      (range 1 11))
@@ -86,7 +86,7 @@
 ;;; Original positions of the first 10 cells as found in the new grid
 (check! #{[1 7 8 9 2 3 4 5 6 10]})
 
-(map (-> {:action :move :index 2 :count 5 :offset 3}
+(map (-> {:action :transpose :index 2 :count 5 :offset 3}
          make-transformation
          :to-grid)
      (range 1 11))
@@ -311,7 +311,7 @@
   (-> (make-chart {:dimensions [:row :col]})
       (operate :row {:action :insert :index 2 :count 10})
       (operate :row {:action :remove :index 4 :count 3})
-      (operate :col {:action :move :index 8 :count 10 :offset -3})
+      (operate :col {:action :transpose :index 8 :count 10 :offset -3})
       (operate :col {:action :remove :index 4 :count 3})))
 
 (defn cell-range [[fr fc] [tr tc]]
@@ -329,9 +329,9 @@
                 (update-in [:tf-stacks 1] disable 1)))
 (check! #{[15 15]})
 
-;;; The node vanishes if we disable the row insertion, the col move, or both
-;;; (its cell is subsequently removed -- this is a case of non-hierarchical
-;;; disable)
+;;; The node vanishes if we disable the row insertion, the col transposition,
+;;; or both (its cell is subsequently removed -- this is a case of
+;;; non-hierarchical disable)
 (map (partial node->cell [[0 5] [0 5]])
      [(update-in test-chart [:tf-stacks 0] disable 0)
       (update-in test-chart [:tf-stacks 1] disable 0)
@@ -372,7 +372,7 @@
                     (-> test-chart
                         ;; disable insertion
                         (update-in [:tf-stacks 0] disable 0)
-                        ;; disable move (essentially insertion to slice)
+                        ;; disable transposition (insertion to slice)
                         (update-in [:tf-stacks 1] disable 0)))
 (check! #(= (cell-range [1 1] [2 3]) (set %)))
 
@@ -386,7 +386,7 @@
 (def test-chart
   (-> (make-chart {:dimensions [:row :col]})
       (operate :col {:action :insert :index 2 :count 3})
-      (operate :row {:action :move :index 3 :count 4 :offset 5})
+      (operate :row {:action :transpose :index 3 :count 4 :offset 5})
       (operate :col {:action :remove :index 9 :count 2})
       (operate :row {:action :insert :index 8 :count 4})))
 
@@ -415,7 +415,7 @@
 
 ;;; New operations discard undone ones
 (-> test-chart undo undo redo
-    (operate :col {:action :move :index 8 :count 2 :offset -3})
+    (operate :col {:action :transpose :index 8 :count 2 :offset -3})
     (operate :row {:action :remove :index 5 :count 1})
     ;; no amount of `redo` can bring back the undone row operation
     redo redo redo redo redo redo

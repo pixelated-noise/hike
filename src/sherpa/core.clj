@@ -15,7 +15,7 @@
   (s/keys :req-un [::action ::index ::count]))
 (defmethod operation :remove [_]
   (s/keys :req-un [::action ::index ::count]))
-(defmethod operation :move [_]
+(defmethod operation :transpose [_]
   (s/keys :req-un [::action ::index ::count ::offset]))
 (s/def ::operation (s/multi-spec operation :action))
 
@@ -69,9 +69,9 @@
 (defmethod make-transformers :remove [op]
   {:to-graph (split op) :to-grid (dead-end op)})
 
-(defmethod make-transformers :move [{:keys [index count offset] :as op}]
-  ;; normalize the `move` (ensuring a positive `offset`) to enable swapping of
-  ;; `count` with `offset` for the `to-graph` transformation
+(defmethod make-transformers :transpose [{:keys [index count offset] :as op}]
+  ;; normalize `transpose` (ensuring a positive `offset`) to enable swapping
+  ;; of `count` with `offset` for the `to-graph` transformation
   (let [{:keys [count offset] :as op} (if-not (neg? offset) op
                                               {:index  (+ index offset)
                                                :count  (- offset)
