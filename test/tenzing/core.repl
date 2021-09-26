@@ -4,20 +4,20 @@
 
 ;;; Bindings to private definitions
 (def make-transformation (deref (var sut/make-transformation)))
-(def to-graph (deref (var sut/to-graph)))
-(def to-grid (deref (var sut/to-grid)))
+(def descend (deref (var sut/descend)))
+(def ascend (deref (var sut/ascend)))
 (def disable (deref (var sut/disable)))
 (def enable (deref (var sut/enable)))
 (def push (deref (var sut/push)))
 (def make-transformation-stack (deref (var sut/make-transformation-stack)))
 
 
-;;; Insertion creates a to-graph dead-end and a to-grid split. Asking for the
-;;; positions of the cells 1-10 after inserting 4 new ones at position 2
+;;; Insertion creates a dead-end on descend and a split on ascend. Asking for
+;;; the positions of the cells 1-10 after inserting 4 new ones at position 2
 ;;; (i.e. the first new cell will be at 2).
 (map (-> {:action :insert :index 2 :count 4}
          make-transformation
-         :to-grid)
+         :ascend)
      (range 1 11))
 
 ;;; The cell at 1 is there, all the rest are moved 4 slots to the right.
@@ -27,23 +27,23 @@
 ;;; positions of cells 1-10 in the new grid.
 (map (-> {:action :insert :index 2 :count 4}
          make-transformation
-         :to-graph)
+         :descend)
      (range 1 11))
 
-;;; The cell at 1 is unchanged, the next 4 (new) aren't there (`nil`) and the
+;;; The cell at 1 is unchanged, the next 4 (new) aren't there (nil) and the
 ;;; rest correspond to 4 positions to the left.
 (check! #{[1 nil nil nil nil 2 3 4 5 6]})
 
 
-;;; Removal creates a to-graph split and a to-grid dead-end. Asking for the
-;;; positions of the cells 1-10 after removing 2 at position 4 (i.e. the first
-;;; new cell will be at 2).
+;;; Removal creates a split on descend and a dead-end on ascend. Asking for
+;;; the positions of the cells 1-10 after removing 2 at position 4 (i.e. the
+;;; first new cell will be at 2).
 (map (-> {:action :remove :index 4 :count 2}
          make-transformation
-         :to-grid)
+         :ascend)
      (range 1 11))
 
-;;; The cells at 1-3 are unchanged, the next 2 cells cause early exit (`nil`)
+;;; The cells at 1-3 are unchanged, the next 2 cells cause early exit (nil)
 ;;; and the rest correspond to 2 positions to the left.
 (check! #{[1 2 3 nil nil 4 5 6 7 8]})
 
@@ -51,7 +51,7 @@
 ;;; positions of cells 1-10 in the new grid.
 (map (-> {:action :remove :index 4 :count 2}
          make-transformation
-         :to-graph)
+         :descend)
      (range 1 11))
 
 ;;; The cells at 1-3 unchanged, all the rest are moved 2 slots to the left.
@@ -63,7 +63,7 @@
 ;;; left.
 (map (-> {:action :transpose :index 7 :count 3 :offset -5}
          make-transformation
-         :to-graph)
+         :descend)
      (range 1 11))
 
 ;;; Original positions of the first 10 cells as found in the new grid
@@ -71,7 +71,7 @@
 
 (map (-> {:action :transpose :index 7 :count 3 :offset -5}
          make-transformation
-         :to-grid)
+         :ascend)
      (range 1 11))
 
 ;;; Positions of the cells 1-10 (in their original order)
@@ -81,7 +81,7 @@
 ;;; the right
 (map (-> {:action :transpose :index 2 :count 5 :offset 3}
          make-transformation
-         :to-graph)
+         :descend)
      (range 1 11))
 
 ;;; Original positions of the first 10 cells as found in the new grid
@@ -89,7 +89,7 @@
 
 (map (-> {:action :transpose :index 2 :count 5 :offset 3}
          make-transformation
-         :to-grid)
+         :ascend)
      (range 1 11))
 
 ;;; Positions of the cells 1-10 (in their original order)
@@ -107,7 +107,7 @@
       (push {:action :insert :index 2 :count 3})))
 
 ;;; Early exits as expected
-(map #(to-graph test-tf-stack %) (range 1 25))
+(map #(descend test-tf-stack %) (range 1 25))
 (check! #{[[0 1]
            [6 2] [6 3] [6 4]
            [5 2] [5 3] [5 4]
@@ -120,8 +120,8 @@
 ;;; Round trip leaves positions intact
 (defn round-trip-ok? [tf-stack pos-seq]
   (->> pos-seq
-       (map #(to-graph tf-stack %))
-       (map #(to-grid tf-stack %))
+       (map #(descend tf-stack %))
+       (map #(ascend tf-stack %))
        (= pos-seq)))
 
 (check! (fn [_] (round-trip-ok? test-tf-stack (range 1 21))))
@@ -145,37 +145,37 @@
                          (-> test-tf-stack (disable 0) (disable 1))])))
 
 ;;; Let's see how deactivation of transformations (via disable) is
-;;; handled. Before insertion, we get the to-graph mapping:
-(map #(to-graph test-tf-stack %) (range 1 11))
+;;; handled. With both operations active, we get the following mapping:
+(map #(descend test-tf-stack %) (range 1 11))
 (check! #{[[0 1] [1 2] [1 3] [1 7] [1 8] [1 9] [1 10] [1 11] [0 2] [0 3]]})
 
 
 ;;; Scenario 1: Disable removal
 
 ;;; If we disable the removal, we get the following mapping:
-(map #(to-graph (disable test-tf-stack 1) %) (range 1 11))
+(map #(descend (disable test-tf-stack 1) %) (range 1 11))
 (check! #{[[0 1] [1 2] [1 3] [1 4] [1 5] [1 6] [1 7] [1 8] [1 9] [1 10]]})
 
 ;;; Before the disable, cells from [1 4], [1 5] and [1 6] were inactive...
 (check! (fn [_]
-          (= (map #(to-grid test-tf-stack %)
+          (= (map #(ascend test-tf-stack %)
                   [[1 3] [1 4] [1 5] [1 6] [1 7]])
              [3 nil nil nil 4])))
 
 ;;; ... but if any one of them corresponded to a slice edge, we could have
 ;;; specified the appropriate bypass direction to obtain appropriate results.
 (check! (fn [_]
-          (= (map #(to-grid test-tf-stack % :min)
+          (= (map #(ascend test-tf-stack % :min)
                   [[1 3] [1 4] [1 5] [1 6] [1 7]])
              [3 3 3 3 4])))
 
 (check! (fn [_]
-          (= (map #(to-grid test-tf-stack % :max)
+          (= (map #(ascend test-tf-stack % :max)
                   [[1 3] [1 4] [1 5] [1 6] [1 7]])
              [3 4 4 4 4])))
 
 ;;; After the removal disable, these cells return back to their place:
-(check! (fn [_] (= (map #(to-grid (disable test-tf-stack 1) %)
+(check! (fn [_] (= (map #(ascend (disable test-tf-stack 1) %)
                         [[1 3] [1 4] [1 5] [1 6] [1 7]])
                    [3 4 5 6 7])))
 
@@ -184,20 +184,20 @@
 
 ;;; If we disable the insertion, we get the following mapping (note that no
 ;;; cells originating from layout 1 are seen in the (top-level) layout 2):
-(map #(to-graph (disable test-tf-stack 0) %) (range 1 11))
+(map #(descend (disable test-tf-stack 0) %) (range 1 11))
 (check! #{[[0 1] [0 2] [0 3] [0 7] [0 8] [0 9] [0 10] [0 11] [0 12] [0 13]]})
 
 ;;; The (inactive) layout 1 cells are now mapped to nowhere:
 (check! (fn [_] (->> (range 1 25)
                      (map #(-> test-tf-stack
                                (disable 0)
-                               (to-grid [1 %])))
+                               (ascend [1 %])))
                      (every? nil?))))
 
 ;;; Not so for the (original) layout 0:
 (map #(-> test-tf-stack
           (disable 0)
-          (to-grid [0 %]))
+          (ascend [0 %]))
      (range 1 20))
 
 (check! #{[1 2 3 nil nil nil 4 5 6 7 8 9 10 11 12 13 14 15 16]})
@@ -208,13 +208,13 @@
 ;;; transformation stack):
 (map #(-> test-tf-stack
           (disable 0)
-          (to-grid [1 %] :min))
+          (ascend [1 %] :min))
      (range 1 25))
 (check! #{[1 1 1 1 1 1 1 1 1 1 1 2 3 3 3 3 4 5 6 7 8 9 10 11]})
 
 (map #(-> test-tf-stack
           (disable 0)
-          (to-grid [1 %] :max))
+          (ascend [1 %] :max))
      (range 1 25))
 (check! #{[1 2 2 2 2 2 2 2 2 2 2 2 3 4 4 4 4 5 6 7 8 9 10 11]})
 
@@ -222,89 +222,89 @@
 ;;; Scenario 3: Individual disable and slices
 
 ;;; Let's remember the origins of the cells at the first positions:
-(map #(to-graph test-tf-stack %) (range 1 11))
+(map #(descend test-tf-stack %) (range 1 11))
 (check! #{[[0 1] [1 2] [1 3] [1 7] [1 8] [1 9] [1 10] [1 11] [0 2] [0 3]]})
 
 ;;; After both the insertion and removal, we refer to the 2:5 slice...
-(map #(to-graph test-tf-stack %) (range 2 6))
+(map #(descend test-tf-stack %) (range 2 6))
 (check! #{[[1 2] [1 3] [1 7] [1 8]]})
 
 ;;; ... and sure enough, the reverse mapping is preserved:
-(map #(to-grid test-tf-stack %) [[1 2] [1 3] [1 7] [1 8]])
+(map #(ascend test-tf-stack %) [[1 2] [1 3] [1 7] [1 8]])
 (check! #{(range 2 6)})
 
 ;;; If we disable the removal (which removed the cells originating from [1 4]
 ;;; [1 5] and [1 6]) and query that slice's edges, the unremoved cells
 ;;; resurface:
-[(-> test-tf-stack (to-grid [1 2] :max))
- (-> test-tf-stack (to-grid [1 8] :min))]
+[(-> test-tf-stack (ascend [1 2] :max))
+ (-> test-tf-stack (ascend [1 8] :min))]
 (check! #{[2 5]})
 
-[(-> test-tf-stack (disable 1) (to-grid [1 2] :max))
- (-> test-tf-stack (disable 1) (to-grid [1 8] :min))]
+[(-> test-tf-stack (disable 1) (ascend [1 2] :max))
+ (-> test-tf-stack (disable 1) (ascend [1 8] :min))]
 (check! #{[2 8]})
 
 ;;; If we disable the insertion (which inserted all of the slice cells) and
 ;;; query for the slice edges, we get an empty position interval (init > term)
-[(-> test-tf-stack (disable 0) (to-grid [1 2] :max))
- (-> test-tf-stack (disable 0) (to-grid [1 8] :min))]
+[(-> test-tf-stack (disable 0) (ascend [1 2] :max))
+ (-> test-tf-stack (disable 0) (ascend [1 8] :min))]
 (check! #{[2 1]})
 
-[(-> test-tf-stack (disable 1) (disable 0) (to-grid [1 2] :max))
- (-> test-tf-stack (disable 1) (disable 0) (to-grid [1 8] :min))]
+[(-> test-tf-stack (disable 1) (disable 0) (ascend [1 2] :max))
+ (-> test-tf-stack (disable 1) (disable 0) (ascend [1 8] :min))]
 (check! #{[2 1]})
 
 ;;; Slice from initial layout origin to a inserted, then removed cell (0 =
 ;;; insertion, 1 = removal):
-[(-> test-tf-stack (to-grid [0 1] :max))
- (-> test-tf-stack (to-grid [1 5] :min))]
+[(-> test-tf-stack (ascend [0 1] :max))
+ (-> test-tf-stack (ascend [1 5] :min))]
 (check! #{[1 3]})
 
-[(-> test-tf-stack (disable 1) (to-grid [0 1] :max))
- (-> test-tf-stack (disable 1) (to-grid [1 5] :min))]
+[(-> test-tf-stack (disable 1) (ascend [0 1] :max))
+ (-> test-tf-stack (disable 1) (ascend [1 5] :min))]
 (check! #{[1 5]})
 
-[(-> test-tf-stack (disable 0) (to-grid [0 1] :max))
- (-> test-tf-stack (disable 0) (to-grid [1 5] :min))]
+[(-> test-tf-stack (disable 0) (ascend [0 1] :max))
+ (-> test-tf-stack (disable 0) (ascend [1 5] :min))]
 (check! #{[1 1]})
 
-[(-> test-tf-stack (disable 1) (disable 0) (to-grid [0 1] :max))
- (-> test-tf-stack (disable 1) (disable 0) (to-grid [1 5] :min))]
+[(-> test-tf-stack (disable 1) (disable 0) (ascend [0 1] :max))
+ (-> test-tf-stack (disable 1) (disable 0) (ascend [1 5] :min))]
 (check! #{[1 1]})
 
 
 ;;; Scenario 4: Non-linear disable behavior
 
 ;;; Slice in the initial layout outside the affected region:
-[(-> test-tf-stack (to-grid [0 4] :max))
- (-> test-tf-stack (to-grid [0 6] :min))]
+[(-> test-tf-stack (ascend [0 4] :max))
+ (-> test-tf-stack (ascend [0 6] :min))]
 (check! #{[11 13]})
 
 ;;; Undid removal
-[(-> test-tf-stack (disable 1) (to-grid [0 4] :max))
- (-> test-tf-stack (disable 1) (to-grid [0 6] :min))]
+[(-> test-tf-stack (disable 1) (ascend [0 4] :max))
+ (-> test-tf-stack (disable 1) (ascend [0 6] :min))]
 (check! #{[14 16]})
 
 ;;; Undid both insertion and removal
-[(-> test-tf-stack (disable 0) (disable 1) (to-grid [0 4]))
- (-> test-tf-stack (disable 0) (disable 1) (to-grid [0 6]))]
+[(-> test-tf-stack (disable 0) (disable 1) (ascend [0 4]))
+ (-> test-tf-stack (disable 0) (disable 1) (ascend [0 6]))]
 (check! #{[4 6]})
 
 ;;; Undid insertion only: removal removes initial layout cells instead of the
 ;;; inserted ones (which are deactivated)
-(map #(to-graph (disable test-tf-stack 0) %) (range 1 11))
+(map #(descend (disable test-tf-stack 0) %) (range 1 11))
 (check! #{[[0 1] [0 2] [0 3] [0 7] [0 8] [0 9] [0 10] [0 11] [0 12] [0 13]]})
 
-[(-> test-tf-stack (disable 0) (to-grid [0 4]))
- (-> test-tf-stack (disable 0) (to-grid [0 6]))]
+[(-> test-tf-stack (disable 0) (ascend [0 4]))
+ (-> test-tf-stack (disable 0) (ascend [0 6]))]
 (check! #{[nil nil]})
 
-[(-> test-tf-stack (disable 0) (to-grid [0 4] :max))
- (-> test-tf-stack (disable 0) (to-grid [0 6] :min))]
+[(-> test-tf-stack (disable 0) (ascend [0 4] :max))
+ (-> test-tf-stack (disable 0) (ascend [0 6] :min))]
 (check! #{[4 3]})
 
-[(-> test-tf-stack (disable 0) (to-grid [0 4] :max))
- (-> test-tf-stack (disable 0) (to-grid [0 7] :min))]
+[(-> test-tf-stack (disable 0) (ascend [0 4] :max))
+ (-> test-tf-stack (disable 0) (ascend [0 7] :min))]
 (check! #{[4 4]})
 
 
@@ -418,7 +418,7 @@
 (-> test-chart undo undo redo
     (operate :col {:action :transpose :index 8 :count 2 :offset -3})
     (operate :row {:action :remove :index 5 :count 1})
-    ;; no amount of `redo` can bring back the undone row operation
+    ;; no amount of redo can bring back the undone row operation
     redo redo redo redo redo redo
     ((juxt show-statuses :trail)))
 (check! #{[{:row [true false true] :col [true true true] :last 4}

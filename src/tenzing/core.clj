@@ -50,9 +50,9 @@
             :else                                    (- pos count)))))
 
 ;;; Bidirectional transformations
-(s/def ::to-grid fn?)
-(s/def ::to-graph fn?)
-(s/def ::transformers (s/keys :req-un [::to-grid ::to-graph]))
+(s/def ::ascend fn?)
+(s/def ::descend fn?)
+(s/def ::transformers (s/keys :req-un [::ascend ::descend]))
 (s/def ::active boolean?)
 (s/def ::transformation
   (s/merge ::transformers (s/keys :req-un [::active] :opt-un [::operation])))
@@ -64,20 +64,20 @@
   :ret ::transformers)
 
 (defmethod make-transformers :insert [op]
-  {:to-graph (dead-end op) :to-grid (split op)})
+  {:descend (dead-end op) :ascend (split op)})
 
 (defmethod make-transformers :remove [op]
-  {:to-graph (split op) :to-grid (dead-end op)})
+  {:descend (split op) :ascend (dead-end op)})
 
 (defmethod make-transformers :transpose [{:keys [index count offset] :as op}]
   ;; normalize `transpose` (ensuring a positive `offset`) to enable swapping
-  ;; of `count` with `offset` for the `to-graph` transformation
+  ;; of `count` with `offset` for the `descend` transformation
   (let [{:keys [count offset] :as op} (if-not (neg? offset) op
                                               {:index  (+ index offset)
                                                :count  (- offset)
                                                :offset count})]
-    {:to-graph (cross (merge op {:count offset :offset count}))
-     :to-grid  (cross op)}))
+    {:descend (cross (merge op {:count offset :offset count}))
+     :ascend  (cross op)}))
 
 (defn- make-transformation [op]
   (-> op make-transformers (assoc :active true :operation op)))
@@ -97,44 +97,44 @@
 (s/def ::layout ::nat)
 (s/def ::coordinate (s/tuple ::layout ::position))
 
-(defn- to-graph [tf-stack pos]
-  (reduce (fn [[layout pos] {:keys [active to-graph]}]
+(defn- descend [tf-stack pos]
+  (reduce (fn [[layout pos] {:keys [active descend]}]
             (if-not active
               ;; `dec` used for tracking the layout regardless of status
               [(dec layout) pos]
-              (if-let [to-pos (to-graph pos)]
+              (if-let [to-pos (descend pos)]
                 [(dec layout) to-pos]
                 (reduced [layout pos]))))
           [(count tf-stack) pos]
           (rseq tf-stack)))
 
-(s/fdef to-graph
+(s/fdef descend
   :args (s/cat :tf-stack ::transformation-stack :pos ::position)
   :ret ::coordinate)
 
-(defn- to-grid
-  ([tf-stack coordinate] (to-grid tf-stack coordinate nil))
+(defn- ascend
+  ([tf-stack coordinate] (ascend tf-stack coordinate nil))
   ([tf-stack [layout pos :as coordinate] bypass]
    (letfn [(active? [layout]
              (or (zero? layout)
                  (:active (get tf-stack (dec layout)))))
            (to-active [[layout pos :as coordinate]]
              (transduce (take-while (complement :active))
-                        (completing (fn [[layout pos] {:keys [to-graph]}]
-                                      [(dec layout) (to-graph pos bypass)]))
+                        (completing (fn [[layout pos] {:keys [descend]}]
+                                      [(dec layout) (descend pos bypass)]))
                         coordinate
                         (rseq (subvec tf-stack 0 layout))))
            (to-visible [[layout pos]]
              (transduce (filter :active)
-                        (completing (fn [pos {:keys [active to-grid]}]
-                                      (or (to-grid pos bypass)
+                        (completing (fn [pos {:keys [active ascend]}]
+                                      (or (ascend pos bypass)
                                           (reduced nil))))
                         pos
                         (subvec tf-stack layout)))]
      (cond (active? layout) (to-visible coordinate)
            bypass           (-> coordinate to-active to-visible)))))
 
-(s/fdef to-grid
+(s/fdef ascend
   :args (s/cat :tf-stack ::transformation-stack
                :coordinate ::coordinate
                :bypass (s/? ::bypass))
@@ -185,7 +185,7 @@
 (defn cell->id
   "Returns the ID for `cell` according to `chart`."
   [cell {:keys [tf-stacks encode] :as chart}]
-  (let [cell->origin (partial map to-graph tf-stacks)]
+  (let [cell->origin (partial map descend tf-stacks)]
     (-> cell cell->origin encode)))
 
 (defn- origin->cell
@@ -193,7 +193,7 @@
    (origin->cell origin chart nil))
   ([origin {:keys [tf-stacks]} bypass]
    (reduce (fn [cell-position [coordinate tf-stack]]
-             (if-let [position (to-grid tf-stack coordinate bypass)]
+             (if-let [position (ascend tf-stack coordinate bypass)]
                (conj cell-position position)
                (reduced nil)))
            []
