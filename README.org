@@ -1,184 +1,238 @@
-#+title: Sherpa
-#+subtitle: Pathfinding between spatial and topological domains
-#+options: toc:nil
-#+options: date:nil
-#+property: header-args:clojure :session :exports code :results silent
+#+title: Tenzing
 
-* Rationale
-  A common feature of end-user applications is the manipulation of UI cells
-  holding interdependent data. The cells are almost always arranged in a
-  spatial domain of some number of dimensions (an 1-d list, a 2-d spreadsheet
-  grid, etc.). Users also sometimes expect to be able to define data segments
-  (contiguous spatial regions, also referred to as slices), which behave
-  "naturally" when doing/undoing spatial operations (inserting, deleting and
-  moving cells around). Furthermore, individual cells as well as slices must
-  always retain their identity during all these operations so that
-  computational dependencies can be defined among them. Sherpa is a library
-  providing a bidirectional mapping between spatial and topological domains,
-  supporting such applications in an efficient and backend/frontend-agnostic
-  manner.
+* Introduction
+  Tenzing is a library for managing identity in mutable grids. The chief
+  example of an application wich such grids is a spreadsheet, where rows and
+  columns can be inserted, removed and moved around. Tenzing provides identity
+  for grid cells, so that data, dependencies and other properties can be
+  attached to them.
 
-* Problem statement and solution sketch
-  To facilitate understanding and communication of ideas, we'll begin by
-  focusing the discussion to a single-dimensional spreadsheet. The user is
-  able to not only add/modify data, but also define computational dependencies
-  between cells (individual and slices), such that a modification of data
-  triggers appropriate updates on downstream (dependent) cells. To serve the
-  application, the mapping component between the spatial and topological
-  domains needs to fulfill the following requirements:
+* Public API
 
-  1. Provide a way to identify graph nodes, so that relations like "node
-     ~<id-2>~ is the sum of the nodes between ~<id-0>~ and ~<id-1>~" can be
-     expressed.
+  + ~(make-chart options)~ Constructs a multi-dimensional chart. If
+    ~dimensions~ are supplied, dimensions are named after them, otherwise
+    anonymous. Iff anonymous, their number is defined by ~dimensionality~. The
+    ~encode~ / ~decode~ functions convert cell origins to/from IDs (both
+    default to ~identity~).
 
-  2. Query node id by cell position and vice versa (detecting deleted cells).
+  + ~(cell->node cell chart)~ Returns the node for ~cell~ according to
+    ~chart~.
 
-  3. Perform spatial operations in the UI, such that cells inserted into a
-     slice are included in it and cells deleted are excluded from it. Moving
-     cells around preserves cell data and behaves accordingly with respect to
-     slices.
+  + ~(node->cell node chart)~ Returns the cell for ~node~ according to
+    ~chart~, ~nil~ if not visible.
 
-  4. Support undoing spatial operations.
+  + ~(slice-nodes->cells slice)~ Returns the cells of ~slice~' (a map
+    containing ~:start~ and ~:end~ nodes) according to ~chart~.
 
-  5. Support an arbitrary number of spatial dimensions.
+  + ~(operate chart dimension operation)~ Performs ~operation~ on the
+    ~dimension~ in ~chart~. For charts with named dimensions, ~dimension~ is a
+    name, otherwise an index. Discards any previously undone operations.
 
-  A straightforward approach would be to use UUIDs and cell/node records. When
-  a cell is first assigned data, we create a record storing its data and
-  position, along with a fresh UUID as node id. From then on, we update the
-  data and position each time they change. Data modification can be either
-  direct (by the user) or derived (by a recomputation event cascade). We have
-  to keep in mind though, direct update messages will contain references from
-  the spatial domain ("data of cell at position 3 changed to ~<data>~"),
-  whereas derived update messages will contain references to the topological
-  domain ("data of node ~<id>~ changed to ~<data>~"). We will therefore need
-  to maintain two indexes over the records -- by node id and cell position --
-  if we are to access them fast in both cases; of which the second one must be
-  updated every time a spatial operation is performed.
+  + ~(undo chart)~ Deactivates the last active operation in ~chart~, if any.
 
-  But we can do better. As usual, new perspectives and approaches may be
-  unveiled by temporarily lifting restrictions and requirements. For example,
-  let's assume for a moment that cell positions are fixed. We can get rid of
-  the second (position) index, if we assign node ids using an one-to-one
-  function from cell positions to node ids [fn:: To be more precise, we need
-  an injective, non-surjective function, since nodes of deleted cells are not
-  represented in the spatial domain. For more information, see [[https://en.wikipedia.org/wiki/Injective_function][Wikipedia]].]. Of
-  course, in the presence of spatial operations, a more sophisticated scheme
-  is required: after inserting, say, 10 new cells at position 3, the cell at
-  position 5 is different than the one that was there before. However, we can
-  still take advantage of the highly structured effect of spatial operations
-  to adopt a procedural representation for them. Thus, assuming we have an
-  identifying initial position for every cell, we can model spatial operations
-  via a stack of procedural transformations (akin to OpenGL transformation
-  matrix stack). Let's see how the implementation of this idea plays out!
+  + ~(redo chart)~ Reactivates the last deactivated operation in ~chart~, if
+    any.
 
-* Layouts, paths and transformations
+  + ~(make-transformers operation)~ Multimethod (dispatched on ~operation~'s
+    ~:action~) for extending the operation set.
 
-  Spatial operations essentially take us from a cell layout to a new one. We
-  can therefore extract a transformation between these layouts for any spatial
-  operation. In this section we'll discuss about fundamental, low-level
-  transformations (insert, delete and move) and the cell paths through layouts
-  that they express. We can think of the transformation stack as in the
-  following diagram:
-  #+begin_src text
-to-graph
-   Λ
-   |  |  ------------------> layout-0 (original)
-   |  |  transformation-0
-   |  |  ------------------> layout-1
-   |  |  transformation-1
-   |  |  ------------------> layout-2
-   |  |  transformation-2
-   |  |  ------------------> layout-3 (user-visible)
-      V
-   to-grid
-  #+end_src
-  The user is at first presented with the original ~layout-0~. If they perform
-  some spatial operation, ~transformation-0~ is pushed onto the transformation
-  stack and ~layout-1~ is in effect. Please note that transformations are
-  bidirectional, i.e. they map old layout positions to new layout ones and
-  vice versa, as required. The "backward" direction (~layout-n+1~ =>
-  ~layout-n~) is called ~to-graph~ direction (leading towards the underlying
-  graph), and the "forward" direction (~layout-n~ => ~layout-n+1~) is called
-  ~to-grid~ direction (leading towards the user-visible UI grid).
+* Introduction
 
-** Low-level transformations
+  For a common 2D spreadsheet grid, we could define a chart like this:
+  #+BEGIN_SRC clojure :exports code :results silent
+(require '[clojure.edn :as edn]
+	 '[tenzing.core :as tz])
 
-   Let's start with cell insertion, considering the addition of a single cell
-   at position 2. Using the initial cell positions as identifiers (and ~*~ for
-   the new cell), we can depict the relation between the two layouts:
-   #+BEGIN_SRC text
-(layout 0) 0 1 2 3 4 5 6 7 ...
-	   | |  \ \ \ \ \ \
-(layout 1) 0 1 * 2 3 4 5 6 7 ...
-   #+END_SRC
-   If we now distribute the layout number over the cells to form ~[<layout>
-   <position>]~ pairs and horizontally align the same cells, the mapping
-   between the before (0) and after (1) layouts becomes:
-   #+BEGIN_SRC text
-[0 0] [0 1]  nil  [0 2] [0 3] [0 4] [0 5] [0 6] [0 7]
-[1 0] [1 1] [1 2] [1 3] [1 4] [1 5] [1 6] [1 7] [1 8]
+(def spreadsheet-chart (tz/make-chart {:dimensions [:row :column]}))
+  #+END_SRC
+
+  Then, we can start asking for cell identities:
+  #+BEGIN_SRC clojure :exports code :results silent
+(def id-1 (tz/cell->id [3 4] spreadsheet-chart))
+(def id-2 (tz/cell->id [13 14] spreadsheet-chart))
+  #+END_SRC
+
+  #+BEGIN_SRC clojure :exports both :results value verbatim
+(map #(tz/id->cell % spreadsheet-chart) [id-1 id-2])
+  #+END_SRC
+
+  #+RESULTS:
+  : ([3 4] [13 14])
+
+  Tenzing supports three actions as grid operations out of the box: insertion
+  (~:insert~ ~:count~ cells at ~:index~), removal (~:remove~ ~:count~
+  consecutive cells starting at ~:index~) and transposition (~:transpose~
+  ~:count~ consecutive cells starting at ~:index~ ~:offset~ positions to the
+  right -- a negative ~:offset~ meaning to the left).
+
+** Insertion
+
+   Let's insert 3 new consecutive rows, with the first new one at position 10:
+   #+BEGIN_SRC clojure :exports both :results value verbatim
+(as-> spreadsheet-chart $
+  (tz/operate $ :row {:action :insert :index 10 :count 3})
+  (map #(tz/id->cell % $) [id-1 id-2]))
    #+END_SRC
 
-   Similarly for the deletion of the cell at position 2:
-   #+BEGIN_SRC text
-(layout 0) 0 1 2 3 4 5 6 7 8 ...
-	   | |  / / / / / /
-(layout 1) 0 1 2 3 4 5 6 7 ...
-   #+END_SRC
-   And the ~[<layout> <position>]~ pair mapping:
-   #+BEGIN_SRC text
-[0 0] [0 1] [0 2] [0 3] [0 4] [0 5] [0 6] [0 7] [0 8]
-[1 0] [1 1]  nil  [1 2] [1 3] [1 4] [1 5] [1 6] [1 7]
-   #+END_SRC
-
-   Finally, consider moving the cell at position 2 one position to the right:
-   #+BEGIN_SRC text
-(layout 0) 0 1 2 3 4 5 6 7 8 ...
-	   | |  X  | | |  |  |
-(layout 1) 0 1 3 2 4 5 6 7 8...
-   #+END_SRC
-   And the ~[<layout> <position>]~ pair mapping:
-   #+BEGIN_SRC text
-[0 0] [0 1] [0 2] [0 3] [0 4] [0 5] [0 6] [0 7] [0 8]
-[1 0] [1 1] [1 3] [1 2] [1 4] [1 5] [1 6] [1 7] [1 8]
+   #+RESULTS:
+   : ([3 4] [16 14])
+   Notice how the cell corresponding to ~node-1~ wasn't affected, but the one
+   for ~node-2~ was moved 3 positions down. Thus, the slice between them has
+   grown:
+   #+BEGIN_SRC clojure :exports both :results value verbatim
+{:before (-> {:start id-1 :end id-2}
+	     (tz/slice-ids->cells spreadsheet-chart)
+	     count)
+ :after  (as-> spreadsheet-chart $
+	   (tz/operate $ :row {:action :insert :index 10 :count 3})
+	   (tz/slice-ids->cells {:start id-1 :end id-2} $)
+	   (count $))}
    #+END_SRC
 
-   TODO: Merge path concept explanation and code for ~split~, ~dead-end~ and
-   ~cross~ into the above cases.
+   #+RESULTS:
+   : {:before 121, :after 154}
 
-** Bidirectional transformations
-   Highlight symmetries (including ~normalize-move~) and construction of
-   bidirectional transformations by ~make-transformation~.
+** Removal
 
-* Tracing paths through the transformation stack
-  Describe logic/algorithm/cases of ~grid->graph~ and ~graph->grid~. Emphasize
-  how ~enable~ and ~disable~ are well-behaved wrt them using a
-  non-hierarchical undo example.
+   Let's remove 3 consecutive columns starting from position 10:
+   #+BEGIN_SRC clojure :exports both :results value verbatim
+(as-> spreadsheet-chart $
+  (tz/operate $ :column {:action :remove :index 10 :count 3})
+  (map #(tz/id->cell % $) [id-1 id-2]))
+   #+END_SRC
 
-* Multiple spatial dimensions
+   #+RESULTS:
+   : ([3 4] [13 11])
+   Notice that, again, the cell corresponding to ~node-1~ wasn't affected, but
+   the one for ~node-2~ was moved 3 positions to the left. Thus, the slice
+   between them has shrunk:
+   #+BEGIN_SRC clojure :exports both :results value verbatim
+{:before (-> {:start id-1 :end id-2}
+	     (tz/slice-ids->cells spreadsheet-chart)
+	     count)
+ :after  (as-> spreadsheet-chart $
+	   (tz/operate $ :column {:action :remove :index 10 :count 3})
+	   (tz/slice-ids->cells {:start id-1 :end id-2} $)
+	   (count $))}
+   #+END_SRC
 
-** Pairing functions
-   Explain pairing functions and how they provide a basis for node id
-   generation.
+   #+RESULTS:
+   : {:before 121, :after 88}
 
-** Implementation
-   Describe ~pair~ and ~unpair~ (principle, gotchas, etc.)
+** Transposition
 
-* Assembling the pieces
+   Let's transpose 3 consecutive rows, starting from position 2, one position
+   up (notice the negative ~:offset~ value)
+   #+BEGIN_SRC clojure :exports both :results value verbatim
+(as-> spreadsheet-chart $
+  (tz/operate $ :row {:action :transpose :index 2 :count 3 :offset -1})
+  (map #(tz/id->cell % $) [id-1 id-2]))
+   #+END_SRC
 
-** Spec
-   Description and justification and adjustable declarations (such as node id
-   type -- it may be very easily converted to a string, for example) in the
-   ~spec~.
+   #+RESULTS:
+   : ([2 4] [13 14])
+   Notice that, this time, the cell corresponding to ~node-2~ wasn't affected,
+   whereas the one for ~node-1~ was indeed moved one position up (as it
+   belonged to the rows being transposed). Thus, the slice between them has
+   grown:
+   #+BEGIN_SRC clojure :exports both :results value verbatim
+{:before (-> {:start id-1 :end id-2}
+	     (tz/slice-ids->cells spreadsheet-chart)
+	     count)
+ :after  (as-> spreadsheet-chart $
+	   (tz/operate $ :row {:action :transpose :index 2 :count 3 :offset -1})
+	   (tz/slice-ids->cells {:start id-1 :end id-2} $)
+	   (count $))}
+   #+END_SRC
 
-** Public API
-   We need to appropriately generalize it first; possibly add a function that
-   constructs encoders/decoders based on a dimensions specification. Also
-   cover ~undo~, ~redo~ here (operation trail, etc).
+   #+RESULTS:
+   : {:before 121, :after 132}
 
-* Parting thoughts
-  Emphasize the simplicity of this pure, representation-based solution (as
-  opposed to a stateful, model-based one) for implementing cell identity and
-  serves towards decoupling application state from UI. Hint at possible
-  pairing optimization by ordering of dimensions and/or multi-way byte
-  interleaving. Point to test suite.
+** Undo/redo
+
+   Tenzing supports linear undo/redo, the scheme most popular among end-user
+   applications. What this means is that we can at any time undo the last
+   active operation. Any undone operation may be redone (i.e. re-activated),
+   provided that no other operations have been applied since the undo. In
+   other words, every new operation truncates history of operations that were
+   undone at the time of its introduction. Let's see it in action (observing
+   the position of ~node-2~ during a simple chain of undos and redos):
+   #+BEGIN_SRC clojure :exports both :results value verbatim
+(loop [chart  (-> spreadsheet-chart
+		  (tz/operate :row {:action :insert :index 10 :count 3})
+		  (tz/operate :column {:action :remove :index 10 :count 3}))
+       ;; notice the extraneous third undo (nop)
+       ops    [tz/undo tz/undo tz/undo tz/redo tz/redo]
+       result [(tz/id->cell id-2 chart)]]
+  (if-not (seq ops) result
+	  (let [new-chart ((first ops) chart)]
+	    (recur new-chart
+		   (rest ops)
+		   (conj result (tz/id->cell id-2 new-chart))))))
+   #+END_SRC
+
+   #+RESULTS:
+   : [[16 11] [16 14] [13 14] [13 14] [16 14] [16 11]]
+   Extraneous undos (when there no more active operations) and redos (when
+   there have been no undos since the last operation) have no effect.
+
+** Extensibility
+
+   Tenzing supports extension of its operation set. To add a new operation, you
+   have to define a method for the ~make-transformers~ multimethod. Its input
+   is a map with no requirements but a unique dispatch (~:action~) value. The
+   method should return a map of two functions:
+
+   + ~(descend pos & [bypass]))~ Returns the old position of the cell at
+     position ~pos~ after the operation. If it was just inserted, return
+     ~nil~, unless the optional ~bypass~ direction (either ~:min~ or ~:max~)
+     is specified. In this case, return the position of the nearest available
+     cell in that direction before the operation is performed.
+
+   + ~(ascend pos & [bypass]))~ Returns the new position of the cell that was
+     at position ~pos~ before the operation. If it was just removed, return
+     ~nil~, unless the optional ~bypass~ direction (either ~:min~ or ~:max~)
+     is specified. In this case, return the position of the nearest available
+     cell in that direction after the operation is performed.
+
+   For example, suppose we want to define an operation which creates a double
+   of every cell along a dimension (to create, for example, a column on the
+   right of each column in a spreadsheet). We can define such an operation by
+   writing something like this:
+   #+BEGIN_SRC clojure :exports code :results silent
+(defmethod tz/make-transformers :interpose [_op]
+  {:descend (fn [pos & [bypass]]
+	      (if (even? pos) (/ pos 2)
+		  (get {:min (dec pos)
+			:max (inc pos)}
+		       bypass)))
+   :ascend  (fn [pos & _] (* pos 2))})
+   #+END_SRC
+   We can now see the new operation in action:
+   #+BEGIN_SRC clojure :exports both :results value verbatim
+(as-> spreadsheet-chart $
+  (tz/operate $ :column {:action :interpose})
+  (map #(tz/id->cell % $) [id-1 id-2]))
+   #+END_SRC
+
+   #+RESULTS:
+   : ([3 8] [13 28])
+   Of course, if we ask for the position of a cell created by the operation
+   after we undo it, we get ~nil~:
+   #+BEGIN_SRC clojure :exports both :results value verbatim
+(let [interposed (tz/operate spreadsheet-chart :column {:action :interpose})]
+  (tz/id->cell (tz/cell->id [3 3] interposed)
+               (tz/undo interposed)))
+   #+END_SRC
+
+   #+RESULTS:
+   : nil
+   For other cells, we get their old position as usual:
+   #+BEGIN_SRC clojure :exports both :results value verbatim
+(let [interposed (tz/operate spreadsheet-chart :column {:action :interpose})]
+  (tz/id->cell (tz/cell->id [3 4] interposed)
+               (tz/undo interposed)))
+   #+END_SRC
+
+   #+RESULTS:
+   : [3 2]
