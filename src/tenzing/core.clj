@@ -1,4 +1,4 @@
-(ns sherpa.core
+(ns tenzing.core
   (:require [clojure.spec.alpha :as s]
             [clojure.math.combinatorics :as comb]))
 
