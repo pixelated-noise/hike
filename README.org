@@ -1,11 +1,11 @@
 #+title: Tenzing
 
 * Introduction
-  Tenzing is a library for managing identity in mutable grids. The chief
-  example of an application wich such grids is a spreadsheet, where rows and
-  columns can be inserted, removed and moved around. Tenzing provides identity
-  for grid cells, so that data, dependencies and other properties can be
-  attached to them.
+  Tenzing is a library for managing identity in mutable grids with multiple,
+  mutually independent (orthogonal) dimensions. The chief example of an
+  application which such grids is a spreadsheet, where rows and columns can be
+  inserted, removed and transposed. Tenzing provides identity for grid cells,
+  so that data, dependencies and other properties can be attached to them.
 
 * Public API
 
@@ -222,7 +222,7 @@
    #+BEGIN_SRC clojure :exports both :results value verbatim
 (let [interposed (tz/operate spreadsheet-chart :column {:action :interpose})]
   (tz/id->cell (tz/cell->id [3 3] interposed)
-               (tz/undo interposed)))
+	       (tz/undo interposed)))
    #+END_SRC
 
    #+RESULTS:
@@ -231,8 +231,62 @@
    #+BEGIN_SRC clojure :exports both :results value verbatim
 (let [interposed (tz/operate spreadsheet-chart :column {:action :interpose})]
   (tz/id->cell (tz/cell->id [3 4] interposed)
-               (tz/undo interposed)))
+	       (tz/undo interposed)))
    #+END_SRC
 
    #+RESULTS:
    : [3 2]
+
+** Custom IDs
+
+   Tenzing's ID generation is fully customizable. If we examine an ID from the
+   previous examples, we can see its default ID representation:
+   #+BEGIN_SRC clojure :exports both :results value verbatim
+id-1
+   #+END_SRC
+
+   #+RESULTS:
+   : ([0 3] [0 4])
+   which is a pair for each dimension. Every pair consists of a nonnegative
+   (natural) integer and an integer, in that order. When constructing a chart,
+   we can specify our own ~encode~ and ~decode~ functions, which should
+   translate between this and any other (still unique!) ID representation we
+   need.
+
+   To see where this feature might be useful, consider a spreadsheet's
+   sheets. Each sheet hosts its own grid, but cells may contain references to
+   cells/slices from other grids, so they have to share the space of possible
+   ID values. To do that, we have to attach additional, differentiating data
+   to IDs that might otherwise be identical across different grids. Grids
+   aren't just another dimension, since we expect them to be independent from
+   each other (e.g. if we remove some rows from a grid, we don't expect other
+   grids to change). With that in mind, we can create a chart for a specific
+   sheet's grid:
+   #+BEGIN_SRC clojure :exports both :results value verbatim
+(letfn [(make-sheet-chart [sheet-id]
+	  (tz/make-chart {:dimensions [:row :column]
+			  :encode     #(assoc {:sheet sheet-id} :grid-id %)
+			  :decode     :grid-id}))]
+  (let [chart (make-sheet-chart 1)
+	id    (tz/cell->id [1 2] chart)]
+    [id (tz/id->cell id chart)]))
+   #+END_SRC
+
+   #+RESULTS:
+   : [{:sheet 1, :grid-id ([0 1] [0 2])} [1 2]]
+   This way, the encoder attaches the sheet's ID to make the generated ID
+   globally unique, while the decoder in the referenced sheet's chart picks
+   the grid ID to return the cell position.
+
+   Another use of custom ID generation is some requirement imposed on the
+   type/form of the IDs, e.g. them being byte arrays:
+   #+BEGIN_SRC clojure :exports both :results value verbatim
+(let [chart (tz/make-chart {:dimensions [:row :column]
+			    :encode     #(-> % pr-str .getBytes)
+			    :decode     #(-> % String. edn/read-string)})]
+  (let [id (tz/cell->id [1 2] chart)]
+    [(bytes? id) (tz/id->cell id chart)]))
+   #+END_SRC
+
+   #+RESULTS:
+   : [true [1 2]]
