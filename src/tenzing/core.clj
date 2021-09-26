@@ -90,8 +90,8 @@
 (s/def ::transformation-stack (s/coll-of ::transformation))
 (defn- make-transformation-stack [] [])
 (defn- push [tf-stack op] (conj tf-stack (make-transformation op)))
-(defn- disable [tf-stack tf-id] (assoc-in tf-stack [tf-id :active] false))
-(defn- enable [tf-stack tf-id] (assoc-in tf-stack [tf-id :active] true))
+(defn- disable [tf-stack tf-idx] (assoc-in tf-stack [tf-idx :active] false))
+(defn- enable [tf-stack tf-idx] (assoc-in tf-stack [tf-idx :active] true))
 
 ;;; Threading through transformation stacks
 (s/def ::layout ::nat)
@@ -148,7 +148,7 @@
 (s/def ::dim-index ::nat)
 (s/def ::tf-index ::nat)
 (s/def ::op-pointers (s/coll-of (s/tuple ::dim-index ::tf-index)))
-(s/def ::last-active (s/or :none #{-1} :id ::nat))
+(s/def ::last-active (s/or :none #{-1} :idx ::nat))
 (s/def ::trail (s/keys :req-un [::op-pointers ::last-active]))
 (s/def ::encode ifn?)
 (s/def ::decode ifn?)
@@ -160,8 +160,7 @@
   "Constructs a multi-dimensional chart. If `dimensions` are supplied,
   dimensions are named after them, otherwise anonymous. Iff anonymous, their
   number is defined by `dimensionality`. The `encode`/`decode` functions
-  convert cell origins to/from node IDs for the graph storage backend (both
-  default to `identity`)."
+  convert cell origins to/from IDs (both default to `identity`)."
   [{:keys [dimensions dimensionality encode decode]
     :or   {encode identity decode identity}}]
   (let [named? (seq dimensions)]
@@ -183,8 +182,8 @@
 (s/def ::cell (s/coll-of ::position))
 (s/def ::origin (s/coll-of ::coordinate))
 
-(defn cell->node
-  "Returns the node for `cell` according to `chart`."
+(defn cell->id
+  "Returns the ID for `cell` according to `chart`."
   [cell {:keys [tf-stacks encode] :as chart}]
   (let [cell->origin (partial map to-graph tf-stacks)]
     (-> cell cell->origin encode)))
@@ -200,17 +199,17 @@
            []
            (map vector origin tf-stacks))))
 
-(defn node->cell
-  "Returns the cell for `node` according to `chart`, `nil` if not visible."
-  [node {:keys [decode] :as chart}]
-  (-> node decode (origin->cell chart)))
+(defn id->cell
+  "Returns the cell for `id` according to `chart`, `nil` if not visible."
+  [id {:keys [decode] :as chart}]
+  (-> id decode (origin->cell chart)))
 
-(s/def ::node-id any?)
-(s/def ::start ::node-id)
-(s/def ::end ::node-id)
+(s/def ::id any?)
+(s/def ::start ::id)
+(s/def ::end ::id)
 (s/def ::slice (s/keys :req-un [::start ::end]))
 
-(defn slice-nodes->cells
+(defn slice-ids->cells
   "Returns the `slice`'s cells according to `chart`."
   [{:keys [start end]} {:keys [decode] :as chart}]
   (let [start  (-> start decode (origin->cell chart :max))
@@ -230,12 +229,12 @@
   dimensions, `dimension` is a name, otherwise an index. Discards any
   previously undone operations."
   [{:keys [dim->index tf-stacks] :as chart} dimension operation]
-  (let [index    (dim->index dimension)
-        tf-count (count (nth tf-stacks index))]
+  (let [dim-idx  (dim->index dimension)
+        tf-count (count (nth tf-stacks dim-idx))]
     (-> chart
         discard-undone
-        (update-in [:tf-stacks index] push operation)
-        (update-in [:trail :op-pointers] conj [index tf-count])
+        (update-in [:tf-stacks dim-idx] push operation)
+        (update-in [:trail :op-pointers] conj [dim-idx tf-count])
         (update-in [:trail :last-active] inc))))
 
 (defn undo
@@ -243,17 +242,17 @@
   [{{:keys [op-pointers last-active]} :trail :as chart}]
   ;; check that there is some operation to undo
   (if (neg? last-active) chart
-      (let [[dim-id tf-id] (get op-pointers last-active)]
+      (let [[dim-idx tf-idx] (get op-pointers last-active)]
         (-> chart
-            (update-in [:tf-stacks dim-id] disable tf-id)
+            (update-in [:tf-stacks dim-idx] disable tf-idx)
             (update-in [:trail :last-active] dec)))))
 
 (defn redo
   "Reactivates the last deactivated operation in `chart`, if any."
   [{{:keys [last-active op-pointers]} :trail :as chart}]
   ;; get the operation *after* `last-active`
-  (if-let [[dim-id tf-id] (get op-pointers (inc last-active))]
+  (if-let [[dim-idx tf-idx] (get op-pointers (inc last-active))]
     (-> chart
-        (update-in [:tf-stacks dim-id] enable tf-id)
+        (update-in [:tf-stacks dim-idx] enable tf-idx)
         (update-in [:trail :last-active] inc))
     chart))
