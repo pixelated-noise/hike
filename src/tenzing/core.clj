@@ -3,11 +3,11 @@
             [clojure.math.combinatorics :as comb]))
 
 ;;; Unidirectional transformers
+(s/def ::position integer?)
 (s/def ::nat (s/and integer? (complement neg?)))
-(s/def ::position ::nat)
 
 (s/def ::action keyword?)
-(s/def ::index ::nat)
+(s/def ::index ::position)
 (s/def ::count ::nat)
 (s/def ::offset integer?)
 (defmulti ^:private operation :action)
