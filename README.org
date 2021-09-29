@@ -1,11 +1,11 @@
 #+title: Tenzing
 
-* Introduction
-  Tenzing is a library for managing identity in mutable grids with multiple,
-  mutually independent (orthogonal) dimensions. The chief example of an
-  application which such grids is a spreadsheet, where rows and columns can be
-  inserted, removed and transposed. Tenzing provides identity for grid cells,
-  so that data, dependencies and other properties can be attached to them.
+Tenzing (named after [[https://en.wikipedia.org/wiki/Tenzing_Norgay][Tenzing Norgay]]) is a library for managing identity in
+mutable grids with multiple, mutually independent (orthogonal) dimensions. The
+chief example of an application which such grids is a spreadsheet, where rows
+and columns can be inserted, removed and transposed. Tenzing provides identity
+for grid cells, so that data, dependencies and other properties can be
+attached to them.
 
 * Public API
 
@@ -15,14 +15,13 @@
     ~encode~ / ~decode~ functions convert cell origins to/from IDs (both
     default to ~identity~).
 
-  + ~(cell->node cell chart)~ Returns the node for ~cell~ according to
-    ~chart~.
+  + ~(cell->id cell chart)~ Returns the ID for ~cell~ according to ~chart~.
 
-  + ~(node->cell node chart)~ Returns the cell for ~node~ according to
-    ~chart~, ~nil~ if not visible.
+  + ~(id->cell id chart)~ Returns the cell for ~id~ according to ~chart~,
+    ~nil~ if not visible.
 
-  + ~(slice-nodes->cells slice)~ Returns the cells of ~slice~' (a map
-    containing ~:start~ and ~:end~ nodes) according to ~chart~.
+  + ~(slice->cells slice)~ Returns the cells in ~slice~ (a map containing
+    ~:start~ and ~:end~ IDs) according to ~chart~.
 
   + ~(operate chart dimension operation)~ Performs ~operation~ on the
     ~dimension~ in ~chart~. For charts with named dimensions, ~dimension~ is a
@@ -36,12 +35,11 @@
   + ~(make-transformers operation)~ Multimethod (dispatched on ~operation~'s
     ~:action~) for extending the operation set.
 
-* Introduction
+* Usage
 
-  For a common 2D spreadsheet grid, we could define a chart like this:
+  For a common 2D spreadsheet grid, we might define a chart like this:
   #+BEGIN_SRC clojure :exports code :results silent
-(require '[clojure.edn :as edn]
-	 '[tenzing.core :as tz])
+(require '[tenzing.core :as tz])
 
 (def spreadsheet-chart (tz/make-chart {:dimensions [:row :column]}))
   #+END_SRC
@@ -76,16 +74,16 @@
 
    #+RESULTS:
    : ([3 4] [16 14])
-   Notice how the cell corresponding to ~node-1~ wasn't affected, but the one
-   for ~node-2~ was moved 3 positions down. Thus, the slice between them has
+   Notice how the cell corresponding to ~id-1~ wasn't affected, but the one
+   for ~id-2~ was moved 3 positions down. Thus, the slice between them has
    grown:
    #+BEGIN_SRC clojure :exports both :results value verbatim
 {:before (-> {:start id-1 :end id-2}
-	     (tz/slice-ids->cells spreadsheet-chart)
+	     (tz/slice->cells spreadsheet-chart)
 	     count)
  :after  (as-> spreadsheet-chart $
 	   (tz/operate $ :row {:action :insert :index 10 :count 3})
-	   (tz/slice-ids->cells {:start id-1 :end id-2} $)
+	   (tz/slice->cells {:start id-1 :end id-2} $)
 	   (count $))}
    #+END_SRC
 
@@ -103,16 +101,16 @@
 
    #+RESULTS:
    : ([3 4] [13 11])
-   Notice that, again, the cell corresponding to ~node-1~ wasn't affected, but
-   the one for ~node-2~ was moved 3 positions to the left. Thus, the slice
+   Notice that, again, the cell corresponding to ~id-1~ wasn't affected, but
+   the one for ~id-2~ was moved 3 positions to the left. Thus, the slice
    between them has shrunk:
    #+BEGIN_SRC clojure :exports both :results value verbatim
 {:before (-> {:start id-1 :end id-2}
-	     (tz/slice-ids->cells spreadsheet-chart)
+	     (tz/slice->cells spreadsheet-chart)
 	     count)
  :after  (as-> spreadsheet-chart $
 	   (tz/operate $ :column {:action :remove :index 10 :count 3})
-	   (tz/slice-ids->cells {:start id-1 :end id-2} $)
+	   (tz/slice->cells {:start id-1 :end id-2} $)
 	   (count $))}
    #+END_SRC
 
@@ -131,17 +129,16 @@
 
    #+RESULTS:
    : ([2 4] [13 14])
-   Notice that, this time, the cell corresponding to ~node-2~ wasn't affected,
-   whereas the one for ~node-1~ was indeed moved one position up (as it
-   belonged to the rows being transposed). Thus, the slice between them has
-   grown:
+   Notice that, this time, the cell corresponding to ~id-2~ wasn't affected,
+   whereas the one for ~id-1~ was indeed moved one position up (as it belonged
+   to the rows being transposed). Thus, the slice between them has grown:
    #+BEGIN_SRC clojure :exports both :results value verbatim
 {:before (-> {:start id-1 :end id-2}
-	     (tz/slice-ids->cells spreadsheet-chart)
+	     (tz/slice->cells spreadsheet-chart)
 	     count)
  :after  (as-> spreadsheet-chart $
 	   (tz/operate $ :row {:action :transpose :index 2 :count 3 :offset -1})
-	   (tz/slice-ids->cells {:start id-1 :end id-2} $)
+	   (tz/slice->cells {:start id-1 :end id-2} $)
 	   (count $))}
    #+END_SRC
 
@@ -156,7 +153,7 @@
    provided that no other operations have been applied since the undo. In
    other words, every new operation truncates history of operations that were
    undone at the time of its introduction. Let's see it in action (observing
-   the position of ~node-2~ during a simple chain of undos and redos):
+   the position of ~id-2~ during a simple chain of undos and redos):
    #+BEGIN_SRC clojure :exports both :results value verbatim
 (loop [chart  (-> spreadsheet-chart
 		  (tz/operate :row {:action :insert :index 10 :count 3})
@@ -240,18 +237,18 @@
 ** Custom IDs
 
    Tenzing's ID generation is fully customizable. If we examine an ID from the
-   previous examples, we can see its default ID representation:
+   previous examples, we can see its default representation:
    #+BEGIN_SRC clojure :exports both :results value verbatim
 id-1
    #+END_SRC
 
    #+RESULTS:
    : ([0 3] [0 4])
-   which is a pair for each dimension. Every pair consists of a nonnegative
-   (natural) integer and an integer, in that order. When constructing a chart,
-   we can specify our own ~encode~ and ~decode~ functions, which should
-   translate between this and any other (still unique!) ID representation we
-   need.
+   which is a sequence of pairs, one for each dimension. Every pair consists
+   of a nonnegative (natural) integer and an integer, in that order. When
+   constructing a chart, we can specify our own ~encode~ and ~decode~
+   functions, which should translate between this and any other (still
+   unique!) ID representation we need.
 
    To see where this feature might be useful, consider a spreadsheet's
    sheets. Each sheet hosts its own grid, but cells may contain references to
@@ -283,9 +280,9 @@ id-1
    #+BEGIN_SRC clojure :exports both :results value verbatim
 (let [chart (tz/make-chart {:dimensions [:row :column]
 			    :encode     #(-> % pr-str .getBytes)
-			    :decode     #(-> % String. edn/read-string)})]
-  (let [id (tz/cell->id [1 2] chart)]
-    [(bytes? id) (tz/id->cell id chart)]))
+			    :decode     #(-> % String. clojure.edn/read-string)})
+      id    (tz/cell->id [1 2] chart)]
+  [(bytes? id) (tz/id->cell id chart)])
    #+END_SRC
 
    #+RESULTS:

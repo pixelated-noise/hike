@@ -355,26 +355,26 @@
 
 
 ;;; Slices
-(slice-ids->cells {:start [[0 1] [0 1]]
-                   :end   [[0 2] [0 5]]}
-                  test-chart)
+(slice->cells {:start [[0 1] [0 1]]
+               :end   [[0 2] [0 5]]}
+              test-chart)
 (check! #(= (cell-range [1 1] [9 12]) (set %)))
 
-(slice-ids->cells {:start [[0 1] [0 1]]
-                   :end   [[0 2] [0 5]]}
-                  (-> test-chart
-                      ;; disable removals
-                      (update-in [:tf-stacks 0] disable 1)
-                      (update-in [:tf-stacks 1] disable 1)))
+(slice->cells {:start [[0 1] [0 1]]
+               :end   [[0 2] [0 5]]}
+              (-> test-chart
+                  ;; disable removals
+                  (update-in [:tf-stacks 0] disable 1)
+                  (update-in [:tf-stacks 1] disable 1)))
 (check! #(= (cell-range [1 1] [12 15]) (set %)))
 
-(slice-ids->cells {:start [[0 1] [0 1]]
-                   :end   [[0 2] [0 5]]}
-                  (-> test-chart
-                      ;; disable insertion
-                      (update-in [:tf-stacks 0] disable 0)
-                      ;; disable transposition (insertion to slice)
-                      (update-in [:tf-stacks 1] disable 0)))
+(slice->cells {:start [[0 1] [0 1]]
+               :end   [[0 2] [0 5]]}
+              (-> test-chart
+                  ;; disable insertion
+                  (update-in [:tf-stacks 0] disable 0)
+                  ;; disable transposition (insertion to slice)
+                  (update-in [:tf-stacks 1] disable 0)))
 (check! #(= (cell-range [1 1] [2 3]) (set %)))
 
 

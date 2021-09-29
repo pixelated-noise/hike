@@ -209,7 +209,7 @@
 (s/def ::end ::id)
 (s/def ::slice (s/keys :req-un [::start ::end]))
 
-(defn slice-ids->cells
+(defn slice->cells
   "Returns the `slice`'s cells according to `chart`."
   [{:keys [start end]} {:keys [decode] :as chart}]
   (let [start  (-> start decode (origin->cell chart :max))
