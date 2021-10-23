@@ -38,19 +38,19 @@ that data, dependencies and other properties can be attached to them.
 
   For a common 2D spreadsheet grid, we might define a chart like this:
   #+BEGIN_SRC clojure :exports code :results silent
-(require '[hike.core :as hk])
+(require '[hike.core :as hike])
 
-(def spreadsheet-chart (hk/make-chart {:dimensions [:row :column]}))
+(def spreadsheet-chart (hike/make-chart {:dimensions [:row :column]}))
   #+END_SRC
 
   Then, we can start asking for cell identities:
   #+BEGIN_SRC clojure :exports code :results silent
-(def id-1 (hk/cell->id [3 4] spreadsheet-chart))
-(def id-2 (hk/cell->id [13 14] spreadsheet-chart))
+(def id-1 (hike/cell->id [3 4] spreadsheet-chart))
+(def id-2 (hike/cell->id [13 14] spreadsheet-chart))
   #+END_SRC
 
   #+BEGIN_SRC clojure :exports both :results value verbatim
-(map #(hk/id->cell % spreadsheet-chart) [id-1 id-2])
+(map #(hike/id->cell % spreadsheet-chart) [id-1 id-2])
   #+END_SRC
 
   #+RESULTS:
@@ -67,8 +67,8 @@ that data, dependencies and other properties can be attached to them.
    Let's insert 3 new consecutive rows, with the first new one at position 10:
    #+BEGIN_SRC clojure :exports both :results value verbatim
 (as-> spreadsheet-chart $
-  (hk/operate $ :row {:action :insert :index 10 :count 3})
-  (map #(hk/id->cell % $) [id-1 id-2]))
+  (hike/operate $ :row {:action :insert :index 10 :count 3})
+  (map #(hike/id->cell % $) [id-1 id-2]))
    #+END_SRC
 
    #+RESULTS:
@@ -78,11 +78,11 @@ that data, dependencies and other properties can be attached to them.
    grown:
    #+BEGIN_SRC clojure :exports both :results value verbatim
 {:before (-> {:start id-1 :end id-2}
-	     (hk/slice->cells spreadsheet-chart)
+	     (hike/slice->cells spreadsheet-chart)
 	     count)
  :after  (as-> spreadsheet-chart $
-	   (hk/operate $ :row {:action :insert :index 10 :count 3})
-	   (hk/slice->cells {:start id-1 :end id-2} $)
+	   (hike/operate $ :row {:action :insert :index 10 :count 3})
+	   (hike/slice->cells {:start id-1 :end id-2} $)
 	   (count $))}
    #+END_SRC
 
@@ -94,8 +94,8 @@ that data, dependencies and other properties can be attached to them.
    Let's remove 3 consecutive columns starting from position 10:
    #+BEGIN_SRC clojure :exports both :results value verbatim
 (as-> spreadsheet-chart $
-  (hk/operate $ :column {:action :remove :index 10 :count 3})
-  (map #(hk/id->cell % $) [id-1 id-2]))
+  (hike/operate $ :column {:action :remove :index 10 :count 3})
+  (map #(hike/id->cell % $) [id-1 id-2]))
    #+END_SRC
 
    #+RESULTS:
@@ -105,11 +105,11 @@ that data, dependencies and other properties can be attached to them.
    between them has shrunk:
    #+BEGIN_SRC clojure :exports both :results value verbatim
 {:before (-> {:start id-1 :end id-2}
-	     (hk/slice->cells spreadsheet-chart)
+	     (hike/slice->cells spreadsheet-chart)
 	     count)
  :after  (as-> spreadsheet-chart $
-	   (hk/operate $ :column {:action :remove :index 10 :count 3})
-	   (hk/slice->cells {:start id-1 :end id-2} $)
+	   (hike/operate $ :column {:action :remove :index 10 :count 3})
+	   (hike/slice->cells {:start id-1 :end id-2} $)
 	   (count $))}
    #+END_SRC
 
@@ -122,8 +122,8 @@ that data, dependencies and other properties can be attached to them.
    up (notice the negative ~:offset~ value)
    #+BEGIN_SRC clojure :exports both :results value verbatim
 (as-> spreadsheet-chart $
-  (hk/operate $ :row {:action :transpose :index 2 :count 3 :offset -1})
-  (map #(hk/id->cell % $) [id-1 id-2]))
+  (hike/operate $ :row {:action :transpose :index 2 :count 3 :offset -1})
+  (map #(hike/id->cell % $) [id-1 id-2]))
    #+END_SRC
 
    #+RESULTS:
@@ -133,11 +133,11 @@ that data, dependencies and other properties can be attached to them.
    to the rows being transposed). Thus, the slice between them has grown:
    #+BEGIN_SRC clojure :exports both :results value verbatim
 {:before (-> {:start id-1 :end id-2}
-	     (hk/slice->cells spreadsheet-chart)
+	     (hike/slice->cells spreadsheet-chart)
 	     count)
  :after  (as-> spreadsheet-chart $
-	   (hk/operate $ :row {:action :transpose :index 2 :count 3 :offset -1})
-	   (hk/slice->cells {:start id-1 :end id-2} $)
+	   (hike/operate $ :row {:action :transpose :index 2 :count 3 :offset -1})
+	   (hike/slice->cells {:start id-1 :end id-2} $)
 	   (count $))}
    #+END_SRC
 
@@ -155,16 +155,16 @@ that data, dependencies and other properties can be attached to them.
    the position of ~id-2~ during a simple chain of undos and redos):
    #+BEGIN_SRC clojure :exports both :results value verbatim
 (loop [chart  (-> spreadsheet-chart
-		  (hk/operate :row {:action :insert :index 10 :count 3})
-		  (hk/operate :column {:action :remove :index 10 :count 3}))
+		  (hike/operate :row {:action :insert :index 10 :count 3})
+		  (hike/operate :column {:action :remove :index 10 :count 3}))
        ;; notice the extraneous third undo (nop)
-       ops    [hk/undo hk/undo hk/undo hk/redo hk/redo]
-       result [(hk/id->cell id-2 chart)]]
+       ops    [hike/undo hike/undo hike/undo hike/redo hike/redo]
+       result [(hike/id->cell id-2 chart)]]
   (if-not (seq ops) result
 	  (let [new-chart ((first ops) chart)]
 	    (recur new-chart
 		   (rest ops)
-		   (conj result (hk/id->cell id-2 new-chart))))))
+		   (conj result (hike/id->cell id-2 new-chart))))))
    #+END_SRC
 
    #+RESULTS:
@@ -196,7 +196,7 @@ that data, dependencies and other properties can be attached to them.
    right of each column in a spreadsheet). We can define such an operation by
    writing something like this:
    #+BEGIN_SRC clojure :exports code :results silent
-(defmethod hk/make-transformers :interpose [_op]
+(defmethod hike/make-transformers :interpose [_op]
   {:descend (fn [pos & [bypass]]
 	      (if (even? pos) (/ pos 2)
 		  (get {:min (dec pos)
@@ -207,8 +207,8 @@ that data, dependencies and other properties can be attached to them.
    We can now see the new operation in action:
    #+BEGIN_SRC clojure :exports both :results value verbatim
 (as-> spreadsheet-chart $
-  (hk/operate $ :column {:action :interpose})
-  (map #(hk/id->cell % $) [id-1 id-2]))
+  (hike/operate $ :column {:action :interpose})
+  (map #(hike/id->cell % $) [id-1 id-2]))
    #+END_SRC
 
    #+RESULTS:
@@ -216,18 +216,18 @@ that data, dependencies and other properties can be attached to them.
    Of course, if we ask for the position of a cell created by the operation
    after we undo it, we get ~nil~:
    #+BEGIN_SRC clojure :exports both :results value verbatim
-(let [interposed (hk/operate spreadsheet-chart :column {:action :interpose})]
-  (hk/id->cell (hk/cell->id [3 3] interposed)
-	       (hk/undo interposed)))
+(let [interposed (hike/operate spreadsheet-chart :column {:action :interpose})]
+  (hike/id->cell (hike/cell->id [3 3] interposed)
+	         (hike/undo interposed)))
    #+END_SRC
 
    #+RESULTS:
    : nil
    For other cells, we get their old position as usual:
    #+BEGIN_SRC clojure :exports both :results value verbatim
-(let [interposed (hk/operate spreadsheet-chart :column {:action :interpose})]
-  (hk/id->cell (hk/cell->id [3 4] interposed)
-	       (hk/undo interposed)))
+(let [interposed (hike/operate spreadsheet-chart :column {:action :interpose})]
+  (hike/id->cell (hike/cell->id [3 4] interposed)
+	         (hike/undo interposed)))
    #+END_SRC
 
    #+RESULTS:
@@ -260,12 +260,12 @@ id-1
    sheet's grid:
    #+BEGIN_SRC clojure :exports both :results value verbatim
 (letfn [(make-sheet-chart [sheet-id]
-	  (hk/make-chart {:dimensions [:row :column]
-			  :encode     #(assoc {:sheet sheet-id} :grid-id %)
-			  :decode     :grid-id}))]
+	  (hike/make-chart {:dimensions [:row :column]
+			    :encode     #(assoc {:sheet sheet-id} :grid-id %)
+			    :decode     :grid-id}))]
   (let [chart (make-sheet-chart 1)
-	id    (hk/cell->id [1 2] chart)]
-    [id (hk/id->cell id chart)]))
+	id    (hike/cell->id [1 2] chart)]
+    [id (hike/id->cell id chart)]))
    #+END_SRC
 
    #+RESULTS:
@@ -277,11 +277,11 @@ id-1
    Another use of custom ID generation is some requirement imposed on the
    type/form of the IDs, e.g. them being byte arrays:
    #+BEGIN_SRC clojure :exports both :results value verbatim
-(let [chart (hk/make-chart {:dimensions [:row :column]
-			    :encode     #(-> % pr-str .getBytes)
-			    :decode     #(-> % String. clojure.edn/read-string)})
-      id    (hk/cell->id [1 2] chart)]
-  [(bytes? id) (hk/id->cell id chart)])
+(let [chart (hike/make-chart {:dimensions [:row :column]
+			      :encode     #(-> % pr-str .getBytes)
+			      :decode     #(-> % String. clojure.edn/read-string)})
+      id    (hike/cell->id [1 2] chart)]
+  [(bytes? id) (hike/id->cell id chart)])
    #+END_SRC
 
    #+RESULTS:
