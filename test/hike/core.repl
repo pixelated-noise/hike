@@ -1,6 +1,6 @@
 (require '[cognitect.transcriptor :as xr :refer [check!]]
          '[clojure.math.combinatorics :as comb]
-         '[tenzing.core :as sut :refer :all])
+         '[hike.core :as sut :refer :all])
 
 ;;; Bindings to private definitions
 (def make-transformation (deref (var sut/make-transformation)))
