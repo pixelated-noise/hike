@@ -1,11 +1,10 @@
-#+title: Tenzing
+#+title: Hike
 
-Tenzing (named after [[https://en.wikipedia.org/wiki/Tenzing_Norgay][Tenzing Norgay]]) is a library for managing identity in
-mutable grids with multiple, mutually independent (orthogonal) dimensions. The
-chief example of an application which such grids is a spreadsheet, where rows
-and columns can be inserted, removed and transposed. Tenzing provides identity
-for grid cells, so that data, dependencies and other properties can be
-attached to them.
+Hike is a library for managing identity in mutable grids with multiple,
+mutually independent (orthogonal) dimensions. The chief example of an
+application which such grids is a spreadsheet, where rows and columns can be
+inserted, removed and transposed. Hike provides identity for grid cells, so
+that data, dependencies and other properties can be attached to them.
 
 * Public API
 
@@ -39,25 +38,25 @@ attached to them.
 
   For a common 2D spreadsheet grid, we might define a chart like this:
   #+BEGIN_SRC clojure :exports code :results silent
-(require '[tenzing.core :as tz])
+(require '[hike.core :as hike])
 
-(def spreadsheet-chart (tz/make-chart {:dimensions [:row :column]}))
+(def spreadsheet-chart (hike/make-chart {:dimensions [:row :column]}))
   #+END_SRC
 
   Then, we can start asking for cell identities:
   #+BEGIN_SRC clojure :exports code :results silent
-(def id-1 (tz/cell->id [3 4] spreadsheet-chart))
-(def id-2 (tz/cell->id [13 14] spreadsheet-chart))
+(def id-1 (hike/cell->id [3 4] spreadsheet-chart))
+(def id-2 (hike/cell->id [13 14] spreadsheet-chart))
   #+END_SRC
 
   #+BEGIN_SRC clojure :exports both :results value verbatim
-(map #(tz/id->cell % spreadsheet-chart) [id-1 id-2])
+(map #(hike/id->cell % spreadsheet-chart) [id-1 id-2])
   #+END_SRC
 
   #+RESULTS:
   : ([3 4] [13 14])
 
-  Tenzing supports three actions as grid operations out of the box: insertion
+  Hike supports three actions as grid operations out of the box: insertion
   (~:insert~ ~:count~ cells at ~:index~), removal (~:remove~ ~:count~
   consecutive cells starting at ~:index~) and transposition (~:transpose~
   ~:count~ consecutive cells starting at ~:index~ ~:offset~ positions to the
@@ -68,8 +67,8 @@ attached to them.
    Let's insert 3 new consecutive rows, with the first new one at position 10:
    #+BEGIN_SRC clojure :exports both :results value verbatim
 (as-> spreadsheet-chart $
-  (tz/operate $ :row {:action :insert :index 10 :count 3})
-  (map #(tz/id->cell % $) [id-1 id-2]))
+  (hike/operate $ :row {:action :insert :index 10 :count 3})
+  (map #(hike/id->cell % $) [id-1 id-2]))
    #+END_SRC
 
    #+RESULTS:
@@ -79,11 +78,11 @@ attached to them.
    grown:
    #+BEGIN_SRC clojure :exports both :results value verbatim
 {:before (-> {:start id-1 :end id-2}
-	     (tz/slice->cells spreadsheet-chart)
+	     (hike/slice->cells spreadsheet-chart)
 	     count)
  :after  (as-> spreadsheet-chart $
-	   (tz/operate $ :row {:action :insert :index 10 :count 3})
-	   (tz/slice->cells {:start id-1 :end id-2} $)
+	   (hike/operate $ :row {:action :insert :index 10 :count 3})
+	   (hike/slice->cells {:start id-1 :end id-2} $)
 	   (count $))}
    #+END_SRC
 
@@ -95,8 +94,8 @@ attached to them.
    Let's remove 3 consecutive columns starting from position 10:
    #+BEGIN_SRC clojure :exports both :results value verbatim
 (as-> spreadsheet-chart $
-  (tz/operate $ :column {:action :remove :index 10 :count 3})
-  (map #(tz/id->cell % $) [id-1 id-2]))
+  (hike/operate $ :column {:action :remove :index 10 :count 3})
+  (map #(hike/id->cell % $) [id-1 id-2]))
    #+END_SRC
 
    #+RESULTS:
@@ -106,11 +105,11 @@ attached to them.
    between them has shrunk:
    #+BEGIN_SRC clojure :exports both :results value verbatim
 {:before (-> {:start id-1 :end id-2}
-	     (tz/slice->cells spreadsheet-chart)
+	     (hike/slice->cells spreadsheet-chart)
 	     count)
  :after  (as-> spreadsheet-chart $
-	   (tz/operate $ :column {:action :remove :index 10 :count 3})
-	   (tz/slice->cells {:start id-1 :end id-2} $)
+	   (hike/operate $ :column {:action :remove :index 10 :count 3})
+	   (hike/slice->cells {:start id-1 :end id-2} $)
 	   (count $))}
    #+END_SRC
 
@@ -123,8 +122,8 @@ attached to them.
    up (notice the negative ~:offset~ value)
    #+BEGIN_SRC clojure :exports both :results value verbatim
 (as-> spreadsheet-chart $
-  (tz/operate $ :row {:action :transpose :index 2 :count 3 :offset -1})
-  (map #(tz/id->cell % $) [id-1 id-2]))
+  (hike/operate $ :row {:action :transpose :index 2 :count 3 :offset -1})
+  (map #(hike/id->cell % $) [id-1 id-2]))
    #+END_SRC
 
    #+RESULTS:
@@ -134,11 +133,11 @@ attached to them.
    to the rows being transposed). Thus, the slice between them has grown:
    #+BEGIN_SRC clojure :exports both :results value verbatim
 {:before (-> {:start id-1 :end id-2}
-	     (tz/slice->cells spreadsheet-chart)
+	     (hike/slice->cells spreadsheet-chart)
 	     count)
  :after  (as-> spreadsheet-chart $
-	   (tz/operate $ :row {:action :transpose :index 2 :count 3 :offset -1})
-	   (tz/slice->cells {:start id-1 :end id-2} $)
+	   (hike/operate $ :row {:action :transpose :index 2 :count 3 :offset -1})
+	   (hike/slice->cells {:start id-1 :end id-2} $)
 	   (count $))}
    #+END_SRC
 
@@ -147,7 +146,7 @@ attached to them.
 
 ** Undo/redo
 
-   Tenzing supports linear undo/redo, the scheme most popular among end-user
+   Hike supports linear undo/redo, the scheme most popular among end-user
    applications. What this means is that we can at any time undo the last
    active operation. Any undone operation may be redone (i.e. re-activated),
    provided that no other operations have been applied since the undo. In
@@ -156,16 +155,16 @@ attached to them.
    the position of ~id-2~ during a simple chain of undos and redos):
    #+BEGIN_SRC clojure :exports both :results value verbatim
 (loop [chart  (-> spreadsheet-chart
-		  (tz/operate :row {:action :insert :index 10 :count 3})
-		  (tz/operate :column {:action :remove :index 10 :count 3}))
+		  (hike/operate :row {:action :insert :index 10 :count 3})
+		  (hike/operate :column {:action :remove :index 10 :count 3}))
        ;; notice the extraneous third undo (nop)
-       ops    [tz/undo tz/undo tz/undo tz/redo tz/redo]
-       result [(tz/id->cell id-2 chart)]]
+       ops    [hike/undo hike/undo hike/undo hike/redo hike/redo]
+       result [(hike/id->cell id-2 chart)]]
   (if-not (seq ops) result
 	  (let [new-chart ((first ops) chart)]
 	    (recur new-chart
 		   (rest ops)
-		   (conj result (tz/id->cell id-2 new-chart))))))
+		   (conj result (hike/id->cell id-2 new-chart))))))
    #+END_SRC
 
    #+RESULTS:
@@ -175,7 +174,7 @@ attached to them.
 
 ** Extensibility
 
-   Tenzing supports extension of its operation set. To add a new operation, you
+   Hike supports extension of its operation set. To add a new operation, you
    have to define a method for the ~make-transformers~ multimethod. Its input
    is a map with no requirements but a unique dispatch (~:action~) value. The
    method should return a map of two functions:
@@ -197,7 +196,7 @@ attached to them.
    right of each column in a spreadsheet). We can define such an operation by
    writing something like this:
    #+BEGIN_SRC clojure :exports code :results silent
-(defmethod tz/make-transformers :interpose [_op]
+(defmethod hike/make-transformers :interpose [_op]
   {:descend (fn [pos & [bypass]]
 	      (if (even? pos) (/ pos 2)
 		  (get {:min (dec pos)
@@ -208,8 +207,8 @@ attached to them.
    We can now see the new operation in action:
    #+BEGIN_SRC clojure :exports both :results value verbatim
 (as-> spreadsheet-chart $
-  (tz/operate $ :column {:action :interpose})
-  (map #(tz/id->cell % $) [id-1 id-2]))
+  (hike/operate $ :column {:action :interpose})
+  (map #(hike/id->cell % $) [id-1 id-2]))
    #+END_SRC
 
    #+RESULTS:
@@ -217,18 +216,18 @@ attached to them.
    Of course, if we ask for the position of a cell created by the operation
    after we undo it, we get ~nil~:
    #+BEGIN_SRC clojure :exports both :results value verbatim
-(let [interposed (tz/operate spreadsheet-chart :column {:action :interpose})]
-  (tz/id->cell (tz/cell->id [3 3] interposed)
-	       (tz/undo interposed)))
+(let [interposed (hike/operate spreadsheet-chart :column {:action :interpose})]
+  (hike/id->cell (hike/cell->id [3 3] interposed)
+	         (hike/undo interposed)))
    #+END_SRC
 
    #+RESULTS:
    : nil
    For other cells, we get their old position as usual:
    #+BEGIN_SRC clojure :exports both :results value verbatim
-(let [interposed (tz/operate spreadsheet-chart :column {:action :interpose})]
-  (tz/id->cell (tz/cell->id [3 4] interposed)
-	       (tz/undo interposed)))
+(let [interposed (hike/operate spreadsheet-chart :column {:action :interpose})]
+  (hike/id->cell (hike/cell->id [3 4] interposed)
+	         (hike/undo interposed)))
    #+END_SRC
 
    #+RESULTS:
@@ -236,7 +235,7 @@ attached to them.
 
 ** Custom IDs
 
-   Tenzing's ID generation is fully customizable. If we examine an ID from the
+   Hike's ID generation is fully customizable. If we examine an ID from the
    previous examples, we can see its default representation:
    #+BEGIN_SRC clojure :exports both :results value verbatim
 id-1
@@ -261,12 +260,12 @@ id-1
    sheet's grid:
    #+BEGIN_SRC clojure :exports both :results value verbatim
 (letfn [(make-sheet-chart [sheet-id]
-	  (tz/make-chart {:dimensions [:row :column]
-			  :encode     #(assoc {:sheet sheet-id} :grid-id %)
-			  :decode     :grid-id}))]
+	  (hike/make-chart {:dimensions [:row :column]
+			    :encode     #(assoc {:sheet sheet-id} :grid-id %)
+			    :decode     :grid-id}))]
   (let [chart (make-sheet-chart 1)
-	id    (tz/cell->id [1 2] chart)]
-    [id (tz/id->cell id chart)]))
+	id    (hike/cell->id [1 2] chart)]
+    [id (hike/id->cell id chart)]))
    #+END_SRC
 
    #+RESULTS:
@@ -278,11 +277,11 @@ id-1
    Another use of custom ID generation is some requirement imposed on the
    type/form of the IDs, e.g. them being byte arrays:
    #+BEGIN_SRC clojure :exports both :results value verbatim
-(let [chart (tz/make-chart {:dimensions [:row :column]
-			    :encode     #(-> % pr-str .getBytes)
-			    :decode     #(-> % String. clojure.edn/read-string)})
-      id    (tz/cell->id [1 2] chart)]
-  [(bytes? id) (tz/id->cell id chart)])
+(let [chart (hike/make-chart {:dimensions [:row :column]
+			      :encode     #(-> % pr-str .getBytes)
+			      :decode     #(-> % String. clojure.edn/read-string)})
+      id    (hike/cell->id [1 2] chart)]
+  [(bytes? id) (hike/id->cell id chart)])
    #+END_SRC
 
    #+RESULTS:
