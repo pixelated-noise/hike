@@ -4,7 +4,9 @@ Hike is a library for managing identity in mutable grids with multiple,
 mutually independent (orthogonal) dimensions. The chief example of an
 application which such grids is a spreadsheet, where rows and columns can be
 inserted, removed and transposed. Hike provides identity for grid cells, so
-that data, dependencies and other properties can be attached to them.
+that data, dependencies and other properties can be attached to them. For a
+technical tour of its inner workings, you may want to read [[https://www.pixelated-noise.com/blog/2022/03/01/hike/index.html][the relevant post]]
+on our blog.
 
 * Public API
 
